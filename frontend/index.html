@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>NCAA Scores</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0b1d33">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="NCAA Scores">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="scoreboard">
+  <header class="app-header">
+    <h1>NCAA Scores</h1>
+    <div class="date-nav">
+      <button id="prev-day" aria-label="Previous day">&lsaquo;</button>
+      <span id="date-label"></span>
+      <button id="next-day" aria-label="Next day">&rsaquo;</button>
+      <button id="today-btn">Today</button>
+    </div>
+  </header>
+  <main>
+    <section class="sport-section">
+      <h2>Football</h2>
+      <div id="football-games" class="game-list">
+        <p class="loading">Loading...</p>
+      </div>
+    </section>
+    <section class="sport-section">
+      <h2>Baseball</h2>
+      <div id="baseball-games" class="game-list">
+        <p class="loading">Loading...</p>
+      </div>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
