@@ -615,6 +615,8 @@ main {
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 8px 12px;
+  text-decoration: none;
+  color: var(--text);
 }
 
 .roster-photo {
@@ -623,6 +625,23 @@ main {
   object-fit: cover;
   border-radius: 8px;
   background: var(--bg);
+}
+
+.roster-photo.large {
+  width: 72px;
+  height: 72px;
+}
+
+.player-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.player-header h1 {
+  font-size: 1.2rem;
+  margin: 0 0 4px;
 }
 
 .roster-body {

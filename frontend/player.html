@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Player - NCAA Scores</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0b1d33">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="player">
+  <header class="app-header">
+    <a id="player-back-link" class="back-link" href="index.html">&larr; Back</a>
+  </header>
+  <main>
+    <div class="player-header">
+      <img id="player-photo" class="roster-photo large" alt="">
+      <div>
+        <h1 id="player-name">Loading...</h1>
+        <p id="player-meta" class="settings-help"></p>
+      </div>
+    </div>
+    <div id="player-stats-area">
+      <p class="loading">Loading...</p>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

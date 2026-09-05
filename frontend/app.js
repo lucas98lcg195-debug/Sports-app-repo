@@ -146,6 +146,7 @@ document.addEventListener("DOMContentLoaded", () => {
   else if (page === "standings") initStandingsPage();
   else if (page === "search") initSearchPage();
   else if (page === "settings") initSettingsPage();
+  else if (page === "player") initPlayerPage();
 });
 
 function registerServiceWorker() {
@@ -651,7 +652,7 @@ async function renderTeamSection() {
     renderStatsSection(content, entry);
   } else if (teamPageState.section === "roster") {
     await ensureRosterLoaded(sport);
-    renderRosterSection(content, entry);
+    renderRosterSection(content, entry, sport);
   }
 }
 
@@ -714,10 +715,15 @@ function renderScheduleSection(content, entry, sport) {
 }
 
 function renderStatsSection(content, entry) {
+  renderStatCategories(content, entry.stats || [], "No team stats available right now.");
+}
+
+// Shared by the team stats sub-tab and the individual player page,
+// since both are just a list of {category, stats: [{label, value}]}.
+function renderStatCategories(content, categories, emptyMessage) {
   content.innerHTML = "";
-  const categories = entry.stats || [];
-  if (categories.length === 0) {
-    content.appendChild(el("p", "empty", "No team stats available right now."));
+  if (!categories || categories.length === 0) {
+    content.appendChild(el("p", "empty", emptyMessage));
     return;
   }
   for (const category of categories) {
@@ -735,7 +741,7 @@ function renderStatsSection(content, entry) {
   }
 }
 
-function renderRosterSection(content, entry) {
+function renderRosterSection(content, entry, sport) {
   content.innerHTML = "";
   const players = entry.roster || [];
   if (players.length === 0) {
@@ -744,13 +750,26 @@ function renderRosterSection(content, entry) {
   }
   const list = el("div", "roster-list");
   for (const player of players) {
-    list.appendChild(buildRosterRow(player));
+    list.appendChild(buildRosterRow(player, sport, entry.teamId));
   }
   content.appendChild(list);
 }
 
-function buildRosterRow(player) {
-  const row = el("div", "roster-row");
+function buildRosterRow(player, sport, teamId) {
+  const row = el("a", "roster-row");
+  const params = new URLSearchParams({
+    sport,
+    teamId,
+    playerId: player.id,
+    name: player.name || "",
+    jersey: player.jersey || "",
+    position: player.position || "",
+    headshot: player.headshot || "",
+    height: player.height || "",
+    weight: player.weight || "",
+    playerClass: player.class || "",
+  });
+  row.href = `player.html?${params.toString()}`;
 
   const photo = el("img", "roster-photo");
   photo.src = player.headshot || "icons/team-placeholder.png";
@@ -1211,6 +1230,77 @@ async function loadDeviceCode() {
     codeEl.textContent = data.code;
   } catch (err) {
     codeEl.textContent = "Unavailable";
+    console.error(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Individual player page
+//
+// Bio fields (name, jersey, position, headshot, height, weight, class)
+// come straight from the roster row's link, since the roster call
+// already has all of it. Only season stats need a fresh fetch here.
+// ---------------------------------------------------------------------------
+
+function initPlayerPage() {
+  const params = new URLSearchParams(window.location.search);
+  const sport = params.get("sport");
+  const teamId = params.get("teamId");
+  const playerId = params.get("playerId");
+
+  if (!sport || !playerId) {
+    document.getElementById("player-stats-area").innerHTML = "";
+    document.getElementById("player-stats-area").appendChild(el("p", "error", "Missing player reference."));
+    return;
+  }
+
+  const backLink = document.getElementById("player-back-link");
+  if (teamId) backLink.href = `team.html?sport=${sport}&teamId=${teamId}`;
+
+  renderPlayerBio({
+    name: params.get("name"),
+    jersey: params.get("jersey"),
+    position: params.get("position"),
+    headshot: params.get("headshot"),
+    height: params.get("height"),
+    weight: params.get("weight"),
+    playerClass: params.get("playerClass"),
+  });
+
+  loadPlayerStats(sport, playerId);
+}
+
+function renderPlayerBio(player) {
+  document.title = `${player.name || "Player"} - NCAA Scores`;
+  document.getElementById("player-name").textContent = player.name || "Player";
+
+  const photo = document.getElementById("player-photo");
+  photo.src = player.headshot || "icons/team-placeholder.png";
+  photo.alt = player.name || "";
+
+  const metaParts = [
+    player.position,
+    player.jersey ? `#${player.jersey}` : null,
+    player.playerClass,
+    player.height,
+    player.weight,
+  ].filter(Boolean);
+  document.getElementById("player-meta").textContent = metaParts.join(" · ");
+}
+
+async function loadPlayerStats(sport, playerId) {
+  const content = document.getElementById("player-stats-area");
+  content.innerHTML = "";
+  content.appendChild(el("p", "loading", "Loading stats..."));
+
+  try {
+    const res = await fetch(`/api/player/${sport}/${playerId}/stats`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    renderStatCategories(content, data.categories, "No stats available for this player right now.");
+  } catch (err) {
+    content.innerHTML = "";
+    content.appendChild(el("p", "error", "Could not load this player's stats."));
     console.error(err);
   }
 }
