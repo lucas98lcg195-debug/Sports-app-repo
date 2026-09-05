@@ -501,14 +501,61 @@ def fetch_team_stats_raw(sport: str, team_id: str) -> dict:
 
 
 def parse_team_stats(raw: dict) -> list[dict]:
-    return _extract_stat_categories(raw, "team stats")
+    return _parse_espn_splits(raw, "team stats") or _extract_stat_categories(raw, "team stats")
+
+
+def _parse_espn_splits(raw: dict, log_label: str) -> list[dict]:
+    """Parse the shape confirmed against a real ESPN response for the
+    apis/common/v3 .../athletes/{id}/splits endpoint (and presumed to
+    match the equivalent team endpoint, since it's the same API
+    family). This shape is unlike anything else this app parses: stat
+    names and values are flat, parallel arrays shared across every
+    category, sliced by each category's declared `count` rather than
+    each category nesting its own stats. The actual numbers live under
+    splitCategories, in the group named "split", in whichever entry is
+    named "Season" (the full-season aggregate, as opposed to Home/Away
+    or other situational splits)."""
+    categories_meta = raw.get("categories") or []
+    display_names = raw.get("displayNames") or raw.get("labels") or []
+    split_categories = raw.get("splitCategories") or []
+
+    value_group = next((sc for sc in split_categories if sc.get("name") == "split"), None)
+    if value_group is None:
+        return []
+
+    splits = value_group.get("splits") or []
+    season_split = next((s for s in splits if s.get("displayName") == "Season"), None)
+    if season_split is None and splits:
+        season_split = splits[0]
+    if season_split is None:
+        return []
+
+    values = season_split.get("stats") or []
+
+    parsed = []
+    offset = 0
+    for category in categories_meta:
+        count = category.get("count", 0) if isinstance(category, dict) else 0
+        try:
+            names = display_names[offset : offset + count]
+            cat_values = values[offset : offset + count]
+            stats = [
+                {"label": name, "value": value} for name, value in zip(names, cat_values) if value not in (None, "")
+            ]
+            if stats:
+                parsed.append({"category": category.get("displayName") or category.get("name", "Stats"), "stats": stats})
+        except (KeyError, TypeError, AttributeError) as exc:
+            logger.warning("Skipping malformed %s split category: %s", log_label, exc)
+        offset += count
+
+    return parsed
 
 
 def _extract_stat_categories(raw: dict, log_label: str) -> list[dict]:
-    # ESPN's shape for both team and player statistics endpoints isn't
-    # as consistent as the others we rely on, so this tries a couple of
-    # plausible layouts and returns an empty list rather than raising
-    # if none of them match.
+    # Fallback for a differently-shaped statistics response, kept in
+    # case some sport or context returns this instead of the splits
+    # shape _parse_espn_splits handles. Returns an empty list rather
+    # than raising if neither shape matches.
     categories = (
         ((raw.get("results") or {}).get("stats") or {}).get("categories")
         or (raw.get("splits") or {}).get("categories")
@@ -564,4 +611,4 @@ def fetch_player_stats_raw(sport: str, player_id: str) -> dict:
 
 
 def parse_player_stats(raw: dict) -> list[dict]:
-    return _extract_stat_categories(raw, "player stats")
+    return _parse_espn_splits(raw, "player stats") or _extract_stat_categories(raw, "player stats")
