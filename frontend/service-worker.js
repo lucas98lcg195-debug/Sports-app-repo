@@ -1,9 +1,11 @@
-// Caches the app shell (HTML/CSS/JS/icons) so the app opens offline, and
-// caches team logos aggressively since they almost never change. Live
-// score data from /api/ is never cached here; it always goes to the
-// network so scores stay current.
+// Caches team logos aggressively since they almost never change, but
+// always prefers the network for the app shell (HTML/CSS/JS) so a new
+// deploy shows up on the very next load instead of being masked by a
+// stale cache. The shell cache is only a fallback for when the device
+// is offline. Live score data from /api/ is never cached here; it
+// always goes to the network so scores stay current.
 
-const SHELL_CACHE = "ncaa-scores-shell-v1";
+const SHELL_CACHE = "ncaa-scores-shell-v2";
 const LOGO_CACHE = "ncaa-scores-logos-v1";
 
 const SHELL_ASSETS = [
@@ -53,9 +55,10 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
-  // Same-origin static assets: cache first, fall back to network.
+  // Same-origin app shell: prefer the network so deploys show up right
+  // away, only falling back to the cache when there is no connection.
   if (url.origin === self.location.origin) {
-    event.respondWith(cacheFirst(event.request, SHELL_CACHE));
+    event.respondWith(networkFirst(event.request, SHELL_CACHE));
   }
 });
 
@@ -71,6 +74,22 @@ async function cacheFirst(request, cacheName) {
     }
     return response;
   } catch (err) {
+    if (cached) return cached;
+    throw err;
+  }
+}
+
+async function networkFirst(request, cacheName) {
+  const cache = await caches.open(cacheName);
+
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch (err) {
+    const cached = await cache.match(request);
     if (cached) return cached;
     throw err;
   }
