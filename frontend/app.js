@@ -35,6 +35,7 @@ function el(tag, className, text) {
 
 const scoreboardState = {
   date: new Date(),
+  conference: { football: "", baseball: "" },
 };
 
 function initScoreboardPage() {
@@ -42,8 +43,37 @@ function initScoreboardPage() {
   document.getElementById("next-day").addEventListener("click", () => shiftDate(1));
   document.getElementById("today-btn").addEventListener("click", () => setDate(new Date()));
 
+  for (const sport of SPORTS) {
+    const select = document.getElementById(`${sport}-conference`);
+    select.addEventListener("change", () => {
+      scoreboardState.conference[sport] = select.value;
+      loadSportScoreboard(sport);
+    });
+  }
+
+  loadConferenceOptions();
   loadScoreboards();
   setInterval(loadScoreboards, SCOREBOARD_POLL_MS);
+}
+
+async function loadConferenceOptions() {
+  for (const sport of SPORTS) {
+    const select = document.getElementById(`${sport}-conference`);
+    try {
+      const res = await fetch(`/api/conferences/${sport}`);
+      if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+      const data = await res.json();
+      for (const conf of data.conferences || []) {
+        const option = document.createElement("option");
+        option.value = conf.id;
+        option.textContent = conf.name;
+        select.appendChild(option);
+      }
+    } catch (err) {
+      // Not fatal, the "All Conferences" option still works fine.
+      console.warn(`Could not load ${sport} conferences`, err);
+    }
+  }
 }
 
 function shiftDate(deltaDays) {
@@ -70,18 +100,19 @@ function formatDateLabel(d) {
 
 async function loadScoreboards() {
   document.getElementById("date-label").textContent = formatDateLabel(scoreboardState.date);
-  const dateParam = formatDateParam(scoreboardState.date);
-
-  await Promise.all([
-    loadSportScoreboard("football", dateParam, "football-games"),
-    loadSportScoreboard("baseball", dateParam, "baseball-games"),
-  ]);
+  await Promise.all(SPORTS.map((sport) => loadSportScoreboard(sport)));
 }
 
-async function loadSportScoreboard(sport, dateParam, containerId) {
-  const container = document.getElementById(containerId);
+async function loadSportScoreboard(sport) {
+  const container = document.getElementById(`${sport}-games`);
+  const dateParam = formatDateParam(scoreboardState.date);
+  const conference = scoreboardState.conference[sport];
+
+  let url = `/api/scoreboard/${sport}?date=${dateParam}`;
+  if (conference) url += `&conference=${encodeURIComponent(conference)}`;
+
   try {
-    const res = await fetch(`/api/scoreboard/${sport}?date=${dateParam}`);
+    const res = await fetch(url);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
     renderGames(container, data.games, sport);
@@ -140,6 +171,9 @@ function buildStatusBlock(game) {
   const block = el("div", "status-block");
   if (game.status_state === "in") block.classList.add("live");
   block.appendChild(el("div", "status-detail", game.status_detail || ""));
+  if (game.broadcast) {
+    block.appendChild(el("div", "broadcast", game.broadcast));
+  }
   return block;
 }
 
@@ -185,6 +219,9 @@ function renderGame(content, data, sport) {
   content.appendChild(header);
 
   content.appendChild(el("p", "status-detail", data.status_detail || ""));
+  if (data.broadcast) {
+    content.appendChild(el("p", "broadcast", data.broadcast));
+  }
 
   if (data.teams.some((t) => t.linescores && t.linescores.length > 0)) {
     content.appendChild(buildLineScoreTable(data.teams));
