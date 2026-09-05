@@ -46,6 +46,14 @@ For a player, the header shows position-specific numbers, e.g. total yards, comp
 
 `GET /api/favorites`, `POST /api/favorites`, and `DELETE /api/favorites/{sport}/{teamId}` all take a `device_id` (query parameter for GET and DELETE, request body field for POST) identifying which anonymous device the favorite belongs to. `GET /api/device/code` returns that device's recovery code, generating one the first time it's asked. `POST /api/device/recover` takes a `code` and returns the device id it maps to, which the frontend then adopts as its own so the same favorites follow it. `backend/favorites.py` holds this logic along with the two SQLite tables (`devices` and `favorites`) and the adjective/noun word lists the codes are built from.
 
+## Display time zone
+
+ESPN's own pre-formatted status text for a game that hasn't started yet ("Sat 7:00 PM EDT") bakes in Eastern as part of the string, so there's nothing reliable to convert there without fragile text parsing. Instead, for any game still in the "pre" state, the frontend ignores that string and reformats the game's raw UTC timestamp itself, which every game object already carries, into Central using `formatCentralTime` in `frontend/app.js`. That helper uses the IANA zone name `America/Chicago` rather than a fixed UTC offset, so it accounts for daylight saving automatically instead of drifting an hour off for half the year. A live game's status ("2nd - 7:32") or a final one's ("Final") carries no time zone information at all and is left exactly as ESPN sends it. To display a different zone, change `DISPLAY_TIME_ZONE` (and its `CT` label) in that same file.
+
+## Top 25 filter
+
+Each sport's conference dropdown on the scoreboard has a "Top 25" option alongside the real conferences. It isn't an ESPN conference id, there's no such filter on their end, so picking it fetches that sport's games unfiltered and keeps only the ones with a team currently in that sport's AP Top 25, using the same `/api/rankings/{sport}` data the Rankings tab already shows. The set of ranked team ids is fetched once per sport and reused for the rest of the session.
+
 ## Deploying
 
 The app is a single Python process with no external database, so it deploys cleanly to Render's free web service tier straight from this GitHub repository. Point Render at the `backend/` directory, set the start command to `uvicorn main:app --host 0.0.0.0 --port $PORT`, and the same process will serve the API and the installable frontend at the resulting public URL. A custom domain from a registrar such as Cloudflare can be pointed at that Render service afterward if wanted, though it is not required to use the app.
