@@ -66,6 +66,24 @@ SOURCES = [
     },
 ]
 
+# Personal relevance filter. An article only makes it into the feed if
+# its headline or description mentions one of these, keeping the feed
+# to what's actually wanted rather than every story a general sports
+# outlet publishes. Edit this list directly to change what shows up.
+RELEVANCE_KEYWORDS = [
+    "baseball",
+    "football",
+    "auburn",
+    "mississippi state university",
+    "msu",
+    "transfer portal",
+]
+
+
+def matches_relevance_filter(article: dict) -> bool:
+    haystack = f"{article.get('headline') or ''} {article.get('description') or ''}".lower()
+    return any(keyword in haystack for keyword in RELEVANCE_KEYWORDS)
+
 
 class NewsSourceError(Exception):
     """Raised when a single news source can't be fetched or parsed.

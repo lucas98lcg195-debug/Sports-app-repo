@@ -20,6 +20,8 @@ The conference list is a small static table in `backend/conferences.py` rather t
 
 `GET /api/news` returns a merged, newest-first list of articles from every configured news source, or just one source when given an optional `source` query parameter. `GET /api/news/sources` lists the sources available for that dropdown. The source list lives in `backend/news_client.py`, mixing ESPN's own news endpoint with plain RSS and Atom feeds from a few other outlets, RSS being the format publishers put out specifically for this kind of aggregation. Each source is fetched independently and a dead or wrong feed URL is simply left out of the merged list rather than failing the whole tab, so if a source in that file never shows any articles, its feed URL is the first thing to check and fix.
 
+Every article is also run through a relevance filter before it reaches the feed, keeping only stories whose headline or description mention football, baseball, Auburn, Mississippi State University, MSU, or the transfer portal. That keyword list is `RELEVANCE_KEYWORDS` in `backend/news_client.py`, plain text and easy to edit directly.
+
 ## Deploying
 
 The app is a single Python process with no external database, so it deploys cleanly to Render's free web service tier straight from this GitHub repository. Point Render at the `backend/` directory, set the start command to `uvicorn main:app --host 0.0.0.0 --port $PORT`, and the same process will serve the API and the installable frontend at the resulting public URL. A custom domain from a registrar such as Cloudflare can be pointed at that Render service afterward if wanted, though it is not required to use the app.

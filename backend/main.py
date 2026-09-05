@@ -191,6 +191,7 @@ def get_news(source: Optional[str] = None) -> dict:
             logger.warning("News source %s unavailable: %s", src["id"], exc)
             unavailable_sources.append(src["id"])
 
+    articles = [a for a in articles if news_client.matches_relevance_filter(a)]
     articles.sort(key=_article_sort_key, reverse=True)
 
     return {"source": source, "articles": articles, "unavailable_sources": unavailable_sources}
