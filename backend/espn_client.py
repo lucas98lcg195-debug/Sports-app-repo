@@ -471,9 +471,14 @@ def fetch_team_stats_raw(sport: str, team_id: str) -> dict:
 
 
 def parse_team_stats(raw: dict) -> list[dict]:
-    # ESPN's shape for this endpoint isn't as consistent as the others
-    # we rely on, so this tries a couple of plausible layouts and
-    # returns an empty list rather than raising if none of them match.
+    return _extract_stat_categories(raw, "team stats")
+
+
+def _extract_stat_categories(raw: dict, log_label: str) -> list[dict]:
+    # ESPN's shape for both team and player statistics endpoints isn't
+    # as consistent as the others we rely on, so this tries a couple of
+    # plausible layouts and returns an empty list rather than raising
+    # if none of them match.
     categories = (
         ((raw.get("results") or {}).get("stats") or {}).get("categories")
         or (raw.get("splits") or {}).get("categories")
@@ -500,6 +505,20 @@ def parse_team_stats(raw: dict) -> list[dict]:
                     }
                 )
         except (KeyError, TypeError) as exc:
-            logger.warning("Skipping malformed team stats category: %s", exc)
+            logger.warning("Skipping malformed %s category: %s", log_label, exc)
 
     return parsed
+
+
+# ---------------------------------------------------------------------------
+# Individual player stats
+# ---------------------------------------------------------------------------
+
+
+def fetch_player_stats_raw(sport: str, player_id: str) -> dict:
+    url = f"{BASE_URL}/{_sport_path(sport)}/athletes/{player_id}/stats"
+    return _get(url)
+
+
+def parse_player_stats(raw: dict) -> list[dict]:
+    return _extract_stat_categories(raw, "player stats")

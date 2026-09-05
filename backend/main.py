@@ -43,6 +43,7 @@ STANDINGS_TTL_SECONDS = 3600
 TEAMS_TTL_SECONDS = 86400  # team lists barely ever change
 ROSTER_TTL_SECONDS = 21600  # rosters change at most a few times a season
 TEAM_STATS_TTL_SECONDS = 3600
+PLAYER_STATS_TTL_SECONDS = 3600
 
 REFRESH_JOB_ID = "refresh_scoreboards"
 
@@ -225,6 +226,25 @@ def get_team_stats(sport: str, team_id: str) -> dict:
         raise HTTPException(status_code=502, detail=str(exc))
 
     return {"sport": sport, "team_id": team_id, "categories": categories}
+
+
+@app.get("/api/player/{sport}/{player_id}/stats")
+def get_player_stats(sport: str, player_id: str) -> dict:
+    if sport not in SPORTS:
+        raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
+
+    key = f"player_stats:{sport}:{player_id}"
+
+    def fetch() -> list[dict]:
+        raw = espn_client.fetch_player_stats_raw(sport, player_id)
+        return espn_client.parse_player_stats(raw)
+
+    try:
+        categories = cache.get_or_fetch(key, PLAYER_STATS_TTL_SECONDS, fetch)
+    except espn_client.EspnApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"sport": sport, "player_id": player_id, "categories": categories}
 
 
 @app.get("/api/rankings/{sport}")

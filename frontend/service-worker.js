@@ -17,6 +17,7 @@ const SHELL_ASSETS = [
   "standings.html",
   "search.html",
   "settings.html",
+  "player.html",
   "style.css",
   "app.js",
   "manifest.json",
