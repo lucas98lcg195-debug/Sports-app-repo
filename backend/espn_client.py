@@ -46,6 +46,25 @@ def _get(url: str, params: dict | None = None) -> dict:
         raise EspnApiError(f"ESPN returned invalid JSON: {exc}") from exc
 
 
+def _get_first_working(url_templates: list[str], **format_kwargs) -> dict:
+    """Try each URL template in order, returning the first one that
+    responds successfully. Used for endpoints where ESPN's actual host
+    and path aren't reliably known in advance, athlete and team
+    statistics turned out to live under a different host and namespace
+    than the rest of this app's endpoints, discovered by a 404 in
+    production rather than anything documented. Raises the last error
+    only if every candidate fails."""
+    last_error = None
+    for template in url_templates:
+        url = template.format(**format_kwargs)
+        try:
+            return _get(url)
+        except EspnApiError as exc:
+            last_error = exc
+            continue
+    raise last_error
+
+
 # ---------------------------------------------------------------------------
 # Scoreboard
 # ---------------------------------------------------------------------------
@@ -465,9 +484,20 @@ def parse_roster(raw: dict) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+# Team statistics turned out not to live under the same
+# apis/site/v2 host and namespace as the scoreboard/summary/roster
+# endpoints this app otherwise uses. site.web.api.espn.com's
+# apis/common/v3 namespace is what ESPN's own web player pages use for
+# this data, tried first; the original guess is kept as a fallback in
+# case it works for some sport or team.
+TEAM_STATS_URL_CANDIDATES = [
+    "https://site.web.api.espn.com/apis/common/v3/sports/{sport_path}/teams/{team_id}/statistics",
+    "https://site.api.espn.com/apis/site/v2/sports/{sport_path}/teams/{team_id}/statistics",
+]
+
+
 def fetch_team_stats_raw(sport: str, team_id: str) -> dict:
-    url = f"{BASE_URL}/{_sport_path(sport)}/teams/{team_id}/statistics"
-    return _get(url)
+    return _get_first_working(TEAM_STATS_URL_CANDIDATES, sport_path=_sport_path(sport), team_id=team_id)
 
 
 def parse_team_stats(raw: dict) -> list[dict]:
@@ -515,9 +545,22 @@ def _extract_stat_categories(raw: dict, log_label: str) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+# Confirmed in production: apis/site/v2/.../athletes/{id}/stats 404s.
+# Athlete splits/stats live under site.web.api.espn.com's
+# apis/common/v3 namespace instead, the same one ESPN's own web player
+# pages use. Tries a couple of path names there since which one is
+# right isn't confirmed either, then falls back to the plain athlete
+# bio endpoint, which at least returns something rather than nothing
+# if both stats paths are wrong.
+PLAYER_STATS_URL_CANDIDATES = [
+    "https://site.web.api.espn.com/apis/common/v3/sports/{sport_path}/athletes/{player_id}/splits",
+    "https://site.web.api.espn.com/apis/common/v3/sports/{sport_path}/athletes/{player_id}/stats",
+    "https://site.api.espn.com/apis/site/v2/sports/{sport_path}/athletes/{player_id}",
+]
+
+
 def fetch_player_stats_raw(sport: str, player_id: str) -> dict:
-    url = f"{BASE_URL}/{_sport_path(sport)}/athletes/{player_id}/stats"
-    return _get(url)
+    return _get_first_working(PLAYER_STATS_URL_CANDIDATES, sport_path=_sport_path(sport), player_id=player_id)
 
 
 def parse_player_stats(raw: dict) -> list[dict]:
