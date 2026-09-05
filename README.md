@@ -54,6 +54,25 @@ ESPN's own pre-formatted status text for a game that hasn't started yet ("Sat 7:
 
 Each sport's conference dropdown on the scoreboard has a "Top 25" option alongside the real conferences. It isn't an ESPN conference id, there's no such filter on their end, so picking it fetches that sport's games unfiltered and keeps only the ones with a team currently in that sport's AP Top 25, using the same `/api/rankings/{sport}` data the Rankings tab already shows. The set of ranked team ids is fetched once per sport and reused for the rest of the session.
 
+## Close-game push notifications
+
+A toggle on `settings.html` turns on a real Web Push notification (not anything native-app-only) for a football game within a touchdown with five minutes or less left in the 4th quarter, scoped to your own favorited teams so it's not a firehose of every close game in the country. One alert per game, the first time it crosses into that territory, never a repeat while it stays close.
+
+This is genuine browser infrastructure, not a simple toggle: the browser registers a push subscription through the installed service worker, the backend stores it, and when the rule fires, `backend/push.py` signs a message with a VAPID key pair and hands it to `pywebpush`, which encrypts it and delivers it to whichever push service (Apple's, Google's, etc.) that subscription belongs to. The check itself piggybacks on the existing background job that already refreshes live scoreboards every thirty seconds, no extra ESPN polling.
+
+**Deploying this requires two environment variables Render doesn't have by default.** A working VAPID key pair, already generated and verified end to end (real JWT signing, real encryption, a real request that reached Google's push infrastructure and got the correct protocol response back):
+
+```
+VAPID_PRIVATE_KEY=TF82mug2IZnRiCMm_sZNq9_ctAOew5DxUldN1mjxTyM
+VAPID_PUBLIC_KEY=BCEPbcfYsaq0zOeDxCE7szOj0pyGck4bZ-Mg93chKv7j6EpY_ZLsGFRRembqXsCmYRrpHDf6LkXBz2fYUSbK0Ps
+```
+
+Add both as environment variables on the Render service (not committed to the repo, the private key lets whoever holds it sign push messages as this server). A third, optional `VAPID_CLAIM_EMAIL` (defaults to a placeholder) should be a real contact address, some push services use it to reach the sender if something's misconfigured. Without `VAPID_PRIVATE_KEY` and `VAPID_PUBLIC_KEY` set, the toggle on the settings page shows "Not set up yet" and stays disabled rather than failing partway through, `push.is_configured()` gates all of it. Regenerating the keys later invalidates every existing subscription, anyone who'd already turned the toggle on would need to turn it on again.
+
+The notification itself is built with `requireInteraction: false`, so it shows as a plain banner that clears on its own rather than one that has to be dismissed. Whether it actually renders that way on an iPhone also depends on this app's own notification style being set to "Banners" rather than "Alerts" under iOS Settings, a per-app choice on the device itself that no amount of code here can override.
+
+One honest limitation from building this: the entire backend, VAPID signing, encryption, subscription storage, the close-game rule, the once-per-game dedup logic, favorites scoping, and dead-subscription cleanup, was verified for real, including an actual delivery attempt that reached Google's live push infrastructure. What couldn't be verified in this environment is the browser side of `pushManager.subscribe()` actually completing, Playwright's bundled open-source Chromium build lacks the proprietary Google API credentials real push registration needs and the call hangs indefinitely rather than failing with a clear error, a known limitation of testing this specific API with an unsigned Chromium build, unrelated to Safari on a real iPhone. The full enable-notifications flow is worth an actual test on a real device once this is deployed.
+
 ## Deploying
 
 The app is a single Python process with no external database, so it deploys cleanly to Render's free web service tier straight from this GitHub repository. Point Render at the `backend/` directory, set the start command to `uvicorn main:app --host 0.0.0.0 --port $PORT`, and the same process will serve the API and the installable frontend at the resulting public URL. A custom domain from a registrar such as Cloudflare can be pointed at that Render service afterward if wanted, though it is not required to use the app.

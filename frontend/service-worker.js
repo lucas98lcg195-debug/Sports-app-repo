@@ -100,3 +100,44 @@ async function networkFirst(request, cacheName) {
     throw err;
   }
 }
+
+// Close-game alerts. requireInteraction stays false (the default) so
+// this shows as a plain banner that clears on its own rather than one
+// that has to be dismissed, though the final say on banner-vs-alert
+// style is the per-app choice under the device's own notification
+// settings, not something this code can force either way.
+self.addEventListener("push", (event) => {
+  let payload = { title: "Close game", body: "" };
+  try {
+    if (event.data) payload = event.data.json();
+  } catch (err) {
+    // Fall back to the default above rather than showing nothing.
+  }
+
+  event.waitUntil(
+    self.registration.showNotification(payload.title || "Close game", {
+      body: payload.body || "",
+      icon: "icons/icon-192.png",
+      badge: "icons/icon-192.png",
+      requireInteraction: false,
+      data: { url: payload.url || "index.html" },
+    })
+  );
+});
+
+self.addEventListener("notificationclick", (event) => {
+  event.notification.close();
+  const url = (event.notification.data && event.notification.data.url) || "index.html";
+
+  event.waitUntil(
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+      for (const client of windowClients) {
+        if ("focus" in client) {
+          client.navigate(url);
+          return client.focus();
+        }
+      }
+      return clients.openWindow(url);
+    })
+  );
+});
