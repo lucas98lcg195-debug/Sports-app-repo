@@ -410,3 +410,96 @@ def parse_teams(raw: dict) -> list[dict]:
             logger.warning("Skipping malformed team entry: %s", exc)
 
     return teams
+
+
+# ---------------------------------------------------------------------------
+# Roster
+# ---------------------------------------------------------------------------
+
+
+def fetch_roster_raw(sport: str, team_id: str) -> dict:
+    url = f"{BASE_URL}/{_sport_path(sport)}/teams/{team_id}/roster"
+    return _get(url)
+
+
+def parse_roster(raw: dict) -> list[dict]:
+    athletes = raw.get("athletes") or []
+
+    # Football rosters are grouped by unit (offense/defense/special
+    # teams), each a {"position": ..., "items": [...]}. Other sports
+    # sometimes return a flat list of athletes directly. Flatten either
+    # shape down to one list of players.
+    if athletes and isinstance(athletes[0], dict) and "items" in athletes[0]:
+        flattened = []
+        for group in athletes:
+            flattened.extend(group.get("items") or [])
+        athletes = flattened
+
+    players = []
+    for athlete in athletes:
+        try:
+            position = (athlete.get("position") or {}).get("abbreviation", "")
+            headshot = (athlete.get("headshot") or {}).get("href")
+            experience = (athlete.get("experience") or {}).get("displayValue")
+
+            players.append(
+                {
+                    "id": str(athlete.get("id", "")),
+                    "name": athlete.get("fullName") or athlete.get("displayName", "Unknown"),
+                    "jersey": athlete.get("jersey"),
+                    "position": position,
+                    "headshot": headshot,
+                    "height": athlete.get("displayHeight"),
+                    "weight": athlete.get("displayWeight"),
+                    "class": experience,
+                }
+            )
+        except (KeyError, TypeError) as exc:
+            logger.warning("Skipping malformed roster entry: %s", exc)
+
+    return players
+
+
+# ---------------------------------------------------------------------------
+# Team season stats
+# ---------------------------------------------------------------------------
+
+
+def fetch_team_stats_raw(sport: str, team_id: str) -> dict:
+    url = f"{BASE_URL}/{_sport_path(sport)}/teams/{team_id}/statistics"
+    return _get(url)
+
+
+def parse_team_stats(raw: dict) -> list[dict]:
+    # ESPN's shape for this endpoint isn't as consistent as the others
+    # we rely on, so this tries a couple of plausible layouts and
+    # returns an empty list rather than raising if none of them match.
+    categories = (
+        ((raw.get("results") or {}).get("stats") or {}).get("categories")
+        or (raw.get("splits") or {}).get("categories")
+        or raw.get("categories")
+        or []
+    )
+
+    parsed = []
+    for category in categories:
+        try:
+            stats = [
+                {
+                    "label": stat.get("displayName") or stat.get("shortDisplayName") or stat.get("name"),
+                    "value": stat.get("displayValue"),
+                }
+                for stat in category.get("stats", [])
+                if stat.get("displayValue") is not None
+            ]
+            if stats:
+                parsed.append(
+                    {
+                        "category": category.get("displayName") or category.get("name", "Stats"),
+                        "stats": stats,
+                    }
+                )
+        except (KeyError, TypeError) as exc:
+            logger.warning("Skipping malformed team stats category: %s", exc)
+
+    return parsed
