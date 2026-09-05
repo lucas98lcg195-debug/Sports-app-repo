@@ -180,6 +180,8 @@ async function initScoreboardPage() {
   document.getElementById("next-day").addEventListener("click", () => shiftDate(1));
   document.getElementById("today-btn").addEventListener("click", () => setDate(new Date()));
 
+  initCompactViewToggle();
+
   for (const sport of SPORTS) {
     const select = document.getElementById(`${sport}-conference`);
     select.addEventListener("change", () => {
@@ -192,6 +194,42 @@ async function initScoreboardPage() {
   await loadFavorites();
   loadScoreboards();
   setInterval(loadScoreboards, SCOREBOARD_POLL_MS);
+}
+
+// The compact view is a pure CSS restyle driven by a class on <body>,
+// the same game-row markup renders either way. The choice is just a
+// per-device display preference, so it lives in localStorage rather
+// than anything synced through favorites or the backend.
+const COMPACT_VIEW_STORAGE_KEY = "compactView";
+
+function initCompactViewToggle() {
+  const btn = document.getElementById("compact-toggle-btn");
+  if (!btn) return;
+
+  let isCompact = false;
+  try {
+    isCompact = localStorage.getItem(COMPACT_VIEW_STORAGE_KEY) === "1";
+  } catch (err) {
+    // localStorage can be unavailable (private browsing, disabled
+    // storage), default view is a fine fallback.
+  }
+  applyCompactView(isCompact, btn);
+
+  btn.addEventListener("click", () => {
+    const next = !document.body.classList.contains("compact-view");
+    applyCompactView(next, btn);
+    try {
+      localStorage.setItem(COMPACT_VIEW_STORAGE_KEY, next ? "1" : "0");
+    } catch (err) {
+      // Not fatal, the toggle still works for the rest of this visit.
+    }
+  });
+}
+
+function applyCompactView(isCompact, btn) {
+  document.body.classList.toggle("compact-view", isCompact);
+  btn.classList.toggle("active", isCompact);
+  btn.setAttribute("aria-pressed", isCompact ? "true" : "false");
 }
 
 async function loadConferenceOptions() {

@@ -54,6 +54,10 @@ ESPN's own pre-formatted status text for a game that hasn't started yet ("Sat 7:
 
 Each sport's conference dropdown on the scoreboard has a "Top 25" option alongside the real conferences. It isn't an ESPN conference id, there's no such filter on their end, so picking it fetches that sport's games unfiltered and keeps only the ones with a team currently in that sport's AP Top 25, using the same `/api/rankings/{sport}` data the Rankings tab already shows. The set of ranked team ids is fetched once per sport and reused for the rest of the session.
 
+## Compact view
+
+A button in the scoreboard header, next to search and settings, toggles between the default card-style scoreboard and a compact one, a flat list of rows separated by thin dividers instead of individually bordered cards, each row just the two team logos and the score in between. It's a pure CSS restyle, `frontend/app.js` never builds different markup for the two views, a `compact-view` class toggled on `<body>` is all that changes, so every existing bit of game-row behavior (favorite stars, links through to the game page, live-status coloring) keeps working identically underneath. The choice is remembered per device in `localStorage` under `compactView` and reapplied on load, it's a personal display preference, not something that needs to sync across devices or live on the backend. The toggle only exists on the scores tab, since that's the only page with a game list to restyle.
+
 ## Close-game push notifications
 
 A toggle on `settings.html` turns on a real Web Push notification (not anything native-app-only) for a football game within a touchdown with five minutes or less left in the 4th quarter, scoped to your own favorited teams so it's not a firehose of every close game in the country. One alert per game, the first time it crosses into that territory, never a repeat while it stays close.
