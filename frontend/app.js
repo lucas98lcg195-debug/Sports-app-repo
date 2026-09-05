@@ -372,7 +372,14 @@ async function initGamePage() {
     return;
   }
   await loadFavorites();
-  loadGame(sport, gameId);
+  await loadGame(sport, gameId);
+
+  // Keep polling while the game could still change. Stops itself once
+  // the game goes final, same 30-second floor as the rest of the app.
+  const pollTimer = setInterval(async () => {
+    const stillLive = await loadGame(sport, gameId);
+    if (!stillLive) clearInterval(pollTimer);
+  }, SCOREBOARD_POLL_MS);
 }
 
 async function loadGame(sport, gameId) {
@@ -382,10 +389,12 @@ async function loadGame(sport, gameId) {
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
     renderGame(content, data, sport);
+    return data.status_state !== "post";
   } catch (err) {
     content.innerHTML = "";
     content.appendChild(el("p", "error", "Could not load this game."));
     console.error(err);
+    return true; // a transient fetch error shouldn't permanently stop polling
   }
 }
 
@@ -398,11 +407,26 @@ function renderGame(content, data, sport) {
   }
   content.appendChild(header);
 
+  if (data.situation && data.situation.text) {
+    const strip = el("p", "situation-strip", data.situation.text);
+    if (data.situation.is_red_zone) strip.classList.add("red-zone");
+    content.appendChild(strip);
+  }
+
   content.appendChild(el("p", "status-detail", data.status_detail || ""));
   if (data.broadcast) {
     content.appendChild(el("p", "broadcast", data.broadcast));
   }
+  if (data.venue && data.venue.name) {
+    content.appendChild(el("p", "venue-line", formatVenue(data.venue)));
+  }
   content.appendChild(buildWatchLink(sport, data.id));
+
+  const home = data.teams.find((t) => t.home_away === "home");
+  const away = data.teams.find((t) => t.home_away === "away");
+  if (data.win_probability && data.win_probability.length > 1 && home && away) {
+    content.appendChild(buildWinProbabilityChart(data.win_probability, home, away));
+  }
 
   if (data.teams.some((t) => t.linescores && t.linescores.length > 0)) {
     content.appendChild(buildLineScoreTable(data.teams));
@@ -412,9 +436,20 @@ function renderGame(content, data, sport) {
     content.appendChild(buildTeamStatsTable(data.team_stats));
   }
 
+  if (data.player_stats && data.player_stats.length > 0) {
+    content.appendChild(buildPlayerBoxScores(data.player_stats, sport));
+  }
+
   if (data.scoring_plays && data.scoring_plays.length > 0) {
     content.appendChild(buildScoringPlaysList(data.scoring_plays));
   }
+}
+
+function formatVenue(venue) {
+  const parts = [venue.name];
+  if (venue.city) parts.push(venue.state ? `${venue.city}, ${venue.state}` : venue.city);
+  if (venue.attendance) parts.push(`${venue.attendance.toLocaleString()} attending`);
+  return parts.filter(Boolean).join(" · ");
 }
 
 function buildGameTeamBlock(team, sport) {
@@ -428,11 +463,96 @@ function buildGameTeamBlock(team, sport) {
   link.appendChild(logo);
   block.appendChild(link);
 
-  block.appendChild(el("div", "team-name", team.name));
+  const nameText = team.rank ? `#${team.rank} ${team.name}` : team.name;
+  block.appendChild(el("div", "team-name", nameText));
+  if (team.record) block.appendChild(el("div", "team-record", team.record));
   block.appendChild(buildFavoriteStar(sport, team));
   block.appendChild(el("div", "team-score large", team.score ?? ""));
 
   return block;
+}
+
+function buildWinProbabilityChart(points, homeTeam, awayTeam) {
+  const wrapper = el("div", "win-prob");
+  wrapper.appendChild(el("h2", null, "Win Probability"));
+
+  const width = 300;
+  const height = 70;
+  const stepX = width / (points.length - 1);
+  const coords = points.map((p, i) => `${(i * stepX).toFixed(1)},${(height - (p / 100) * height).toFixed(1)}`);
+
+  const svgNS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(svgNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+  svg.setAttribute("class", "win-prob-chart");
+  svg.setAttribute("preserveAspectRatio", "none");
+
+  const midline = document.createElementNS(svgNS, "line");
+  midline.setAttribute("x1", "0");
+  midline.setAttribute("x2", String(width));
+  midline.setAttribute("y1", String(height / 2));
+  midline.setAttribute("y2", String(height / 2));
+  midline.setAttribute("class", "win-prob-midline");
+  svg.appendChild(midline);
+
+  const polyline = document.createElementNS(svgNS, "polyline");
+  polyline.setAttribute("points", coords.join(" "));
+  polyline.setAttribute("class", "win-prob-line");
+  svg.appendChild(polyline);
+
+  wrapper.appendChild(svg);
+
+  const latest = points[points.length - 1];
+  const labels = el("div", "win-prob-labels");
+  labels.appendChild(el("span", null, `${awayTeam.abbreviation || awayTeam.name}: ${Math.round(100 - latest)}%`));
+  labels.appendChild(el("span", null, `${homeTeam.abbreviation || homeTeam.name}: ${Math.round(latest)}%`));
+  wrapper.appendChild(labels);
+
+  return wrapper;
+}
+
+function buildPlayerBoxScores(playerStats, sport) {
+  const wrapper = el("div", "player-box-scores");
+  wrapper.appendChild(el("h2", null, "Player Stats"));
+
+  for (const teamEntry of playerStats) {
+    const teamBlock = el("div", "box-score-team");
+    teamBlock.appendChild(el("h3", null, teamEntry.team_name));
+
+    for (const group of teamEntry.groups) {
+      if (!group.athletes || group.athletes.length === 0) continue;
+
+      const groupWrapper = el("div", "box-score-group");
+      groupWrapper.appendChild(el("h4", null, group.category));
+
+      const table = document.createElement("table");
+      const headRow = document.createElement("tr");
+      headRow.appendChild(document.createElement("th"));
+      for (const stat of group.athletes[0].stats) {
+        headRow.appendChild(el("th", null, stat.label));
+      }
+      table.appendChild(headRow);
+
+      for (const athlete of group.athletes) {
+        const row = document.createElement("tr");
+        const nameCell = document.createElement("td");
+        const nameLink = el("a", null, athlete.name);
+        nameLink.href = `player.html?sport=${sport}&teamId=${teamEntry.team_id}&playerId=${athlete.id}&name=${encodeURIComponent(athlete.name)}`;
+        nameCell.appendChild(nameLink);
+        row.appendChild(nameCell);
+        for (const stat of athlete.stats) {
+          row.appendChild(el("td", null, stat.value ?? ""));
+        }
+        table.appendChild(row);
+      }
+
+      groupWrapper.appendChild(table);
+      teamBlock.appendChild(groupWrapper);
+    }
+    wrapper.appendChild(teamBlock);
+  }
+
+  return wrapper;
 }
 
 function buildLineScoreTable(teams) {

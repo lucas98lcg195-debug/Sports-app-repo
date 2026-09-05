@@ -295,6 +295,122 @@ main {
   padding: 16px 0;
 }
 
+.team-record {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+}
+
+.situation-strip {
+  text-align: center;
+  font-weight: 700;
+  color: var(--live);
+  margin: 0 0 8px;
+}
+
+.situation-strip.red-zone {
+  color: var(--accent);
+}
+
+.venue-line {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin: 4px 0;
+}
+
+.win-prob {
+  margin: 20px 0;
+}
+
+.win-prob h2 {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 8px;
+}
+
+.win-prob-chart {
+  width: 100%;
+  height: 70px;
+  display: block;
+}
+
+.win-prob-midline {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 4 4;
+}
+
+.win-prob-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.win-prob-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+}
+
+.player-box-scores {
+  margin-top: 20px;
+}
+
+.player-box-scores h2 {
+  font-size: 0.95rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.box-score-team {
+  margin-bottom: 16px;
+}
+
+.box-score-team h3 {
+  font-size: 1rem;
+  margin: 0 0 6px;
+}
+
+.box-score-group {
+  margin-bottom: 12px;
+  overflow-x: auto;
+}
+
+.box-score-group h4 {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0 0 4px;
+}
+
+.box-score-group table {
+  width: 100%;
+  border-collapse: collapse;
+  white-space: nowrap;
+}
+
+.box-score-group th, .box-score-group td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.box-score-group td:first-child, .box-score-group th:first-child {
+  text-align: left;
+}
+
+.box-score-group a {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+}
+
 .line-score, .team-stats table {
   width: 100%;
   border-collapse: collapse;
