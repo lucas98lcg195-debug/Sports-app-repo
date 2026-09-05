@@ -12,6 +12,7 @@ const SHELL_ASSETS = [
   "index.html",
   "game.html",
   "team.html",
+  "news.html",
   "style.css",
   "app.js",
   "manifest.json",

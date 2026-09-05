@@ -4,6 +4,20 @@
 const SPORTS = ["football", "baseball"];
 const SCOREBOARD_POLL_MS = 30000;
 
+// ESPN's public gamecast pages follow this stable pattern on espn.com
+// itself (not the hidden JSON API), so a link built from just the sport
+// and game id reliably lands on the right game's page, where ESPN's own
+// "Watch" button and sign-in live. We never touch a password ourselves.
+const ESPN_SPORT_SLUGS = {
+  football: "college-football",
+  baseball: "college-baseball",
+};
+
+function buildEspnGameUrl(sport, gameId) {
+  const slug = ESPN_SPORT_SLUGS[sport] || sport;
+  return `https://www.espn.com/${slug}/game/_/gameId/${gameId}`;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   registerServiceWorker();
 
@@ -11,6 +25,7 @@ document.addEventListener("DOMContentLoaded", () => {
   if (page === "scoreboard") initScoreboardPage();
   else if (page === "game") initGamePage();
   else if (page === "team") initTeamPage();
+  else if (page === "news") initNewsPage();
 });
 
 function registerServiceWorker() {
@@ -174,7 +189,16 @@ function buildStatusBlock(game) {
   if (game.broadcast) {
     block.appendChild(el("div", "broadcast", game.broadcast));
   }
+  block.appendChild(buildWatchLink(game.sport, game.id));
   return block;
+}
+
+function buildWatchLink(sport, gameId) {
+  const link = el("a", "watch-link", "Watch on ESPN");
+  link.href = buildEspnGameUrl(sport, gameId);
+  link.target = "_blank";
+  link.rel = "noopener";
+  return link;
 }
 
 // ---------------------------------------------------------------------------
@@ -222,6 +246,7 @@ function renderGame(content, data, sport) {
   if (data.broadcast) {
     content.appendChild(el("p", "broadcast", data.broadcast));
   }
+  content.appendChild(buildWatchLink(sport, data.id));
 
   if (data.teams.some((t) => t.linescores && t.linescores.length > 0)) {
     content.appendChild(buildLineScoreTable(data.teams));
@@ -404,4 +429,92 @@ function buildScheduleRow(game, sport) {
   row.appendChild(statusLink);
 
   return row;
+}
+
+// ---------------------------------------------------------------------------
+// News page
+// ---------------------------------------------------------------------------
+
+const newsState = {
+  source: "",
+};
+
+function initNewsPage() {
+  const select = document.getElementById("news-source");
+  select.addEventListener("change", () => {
+    newsState.source = select.value;
+    loadNews();
+  });
+
+  loadNewsSources();
+  loadNews();
+}
+
+async function loadNewsSources() {
+  const select = document.getElementById("news-source");
+  try {
+    const res = await fetch("/api/news/sources");
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    for (const source of data.sources || []) {
+      const option = document.createElement("option");
+      option.value = source.id;
+      option.textContent = source.name;
+      select.appendChild(option);
+    }
+  } catch (err) {
+    // Not fatal, "All Sources" still works fine.
+    console.warn("Could not load news sources", err);
+  }
+}
+
+async function loadNews() {
+  const list = document.getElementById("news-list");
+  let url = "/api/news";
+  if (newsState.source) url += `?source=${encodeURIComponent(newsState.source)}`;
+
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    renderNews(list, data.articles);
+  } catch (err) {
+    list.innerHTML = "";
+    list.appendChild(el("p", "error", "Could not load news."));
+    console.error(err);
+  }
+}
+
+function renderNews(list, articles) {
+  list.innerHTML = "";
+  if (!articles || articles.length === 0) {
+    list.appendChild(el("p", "empty", "No articles available right now."));
+    return;
+  }
+  for (const article of articles) {
+    list.appendChild(buildNewsCard(article));
+  }
+}
+
+function buildNewsCard(article) {
+  const card = el("a", "news-card");
+  card.href = article.link || "#";
+  card.target = "_blank";
+  card.rel = "noopener";
+
+  const thumb = el("img", "news-thumb");
+  thumb.src = article.image || "icons/team-placeholder.png";
+  thumb.alt = "";
+  thumb.loading = "lazy";
+  card.appendChild(thumb);
+
+  const body = el("div", "news-body");
+  body.appendChild(el("div", "news-headline", article.headline || "Untitled"));
+  if (article.description) {
+    body.appendChild(el("div", "news-description", article.description));
+  }
+  body.appendChild(el("div", "news-meta", article.source_name || ""));
+  card.appendChild(body);
+
+  return card;
 }
