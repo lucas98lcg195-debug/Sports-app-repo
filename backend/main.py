@@ -8,7 +8,7 @@ often than every 30 seconds either way.
 """
 
 import logging
-from datetime import date as date_cls
+from datetime import date as date_cls, datetime, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 import cache
 import espn_client
+import news_client
 from conferences import CONFERENCES_BY_SPORT
 from models import game_to_dict
 
@@ -34,6 +35,7 @@ IDLE_POLL_SECONDS = 300
 SCOREBOARD_TTL_SECONDS = 30
 SUMMARY_TTL_SECONDS = 30
 SCHEDULE_TTL_SECONDS = 3600
+NEWS_TTL_SECONDS = 900  # news doesn't need live-score cadence
 
 REFRESH_JOB_ID = "refresh_scoreboards"
 
@@ -165,6 +167,38 @@ def get_team_schedule(sport: str, team_id: str) -> dict:
         return cache.get_or_fetch(key, SCHEDULE_TTL_SECONDS, fetch)
     except espn_client.EspnApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/news/sources")
+def get_news_sources() -> dict:
+    return {"sources": [{"id": s["id"], "name": s["name"]} for s in news_client.SOURCES]}
+
+
+@app.get("/api/news")
+def get_news(source: Optional[str] = None) -> dict:
+    if source and not any(s["id"] == source for s in news_client.SOURCES):
+        raise HTTPException(status_code=404, detail=f"Unknown news source: {source}")
+
+    sources_to_fetch = [s for s in news_client.SOURCES if not source or s["id"] == source]
+
+    articles = []
+    unavailable_sources = []
+    for src in sources_to_fetch:
+        key = f"news:{src['id']}"
+        try:
+            articles.extend(cache.get_or_fetch(key, NEWS_TTL_SECONDS, lambda s=src: news_client.fetch_source(s)))
+        except news_client.NewsSourceError as exc:
+            logger.warning("News source %s unavailable: %s", src["id"], exc)
+            unavailable_sources.append(src["id"])
+
+    articles = [a for a in articles if news_client.matches_relevance_filter(a)]
+    articles.sort(key=_article_sort_key, reverse=True)
+
+    return {"source": source, "articles": articles, "unavailable_sources": unavailable_sources}
+
+
+def _article_sort_key(article: dict) -> datetime:
+    return news_client.parse_published(article.get("published")) or datetime.min.replace(tzinfo=timezone.utc)
 
 
 # Serve the dependency-free frontend straight off disk. This is mounted

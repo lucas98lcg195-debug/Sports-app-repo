@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>News - NCAA Scores</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0b1d33">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="news">
+  <header class="app-header">
+    <h1>NCAA Scores</h1>
+  </header>
+  <nav class="top-nav">
+    <a href="index.html">Scores</a>
+    <a href="news.html" class="active">News</a>
+  </nav>
+  <main>
+    <div class="section-header">
+      <h2>News</h2>
+      <select id="news-source" class="conference-select" aria-label="News source">
+        <option value="">All Sources</option>
+      </select>
+    </div>
+    <div id="news-list" class="news-list">
+      <p class="loading">Loading...</p>
+    </div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>
