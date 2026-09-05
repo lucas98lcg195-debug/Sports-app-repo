@@ -340,23 +340,22 @@ body.compact-view .status-block {
   align-items: center;
   justify-content: center;
   padding: 0 6px;
+  min-width: 44px;
 }
 
-body.compact-view .status-detail,
+/* The time/quarter/Final text replaces the dash divider, reusing the
+   existing .status-detail element and its already-defined live-game
+   coloring, just smaller and allowed to wrap onto a second line since
+   this column is narrower than the default view's. */
+body.compact-view .status-detail {
+  font-size: 0.65rem;
+  white-space: normal;
+  line-height: 1.15;
+}
+
 body.compact-view .broadcast,
 body.compact-view .watch-link {
   display: none;
-}
-
-body.compact-view .status-block::after {
-  content: "\2013";
-  color: var(--text-dim);
-  font-size: 0.9rem;
-  font-weight: 700;
-}
-
-body.compact-view .status-block.live::after {
-  color: var(--live);
 }
 
 .error {
