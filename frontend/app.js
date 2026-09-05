@@ -1627,6 +1627,8 @@ function initSettingsPage() {
       console.error(err);
     }
   });
+
+  initPushToggle();
 }
 
 async function loadDeviceCode() {
@@ -1712,5 +1714,120 @@ async function loadPlayerStats(sport, playerId, position) {
     content.innerHTML = "";
     content.appendChild(el("p", "error", "Could not load this player's stats."));
     console.error(err);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Close-game push notifications
+//
+// Real Web Push, the browser standard, not anything native-app-only.
+// The notification itself is a plain banner (requireInteraction stays
+// false in the service worker's push handler) that clears on its own
+// rather than blocking until dismissed; on iOS that also depends on
+// this app's own notification style being set to "Banners" rather
+// than "Alerts" under iOS Settings, a per-app choice this code can't
+// override.
+// ---------------------------------------------------------------------------
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+function arrayBufferToBase64url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function initPushToggle() {
+  const btn = document.getElementById("push-toggle-btn");
+  const status = document.getElementById("push-status");
+
+  if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+    btn.textContent = "Not supported";
+    btn.disabled = true;
+    status.textContent = "This browser doesn't support push notifications.";
+    return;
+  }
+
+  let config;
+  try {
+    const res = await fetch("/api/push/vapid-public-key");
+    config = await res.json();
+  } catch (err) {
+    btn.textContent = "Unavailable";
+    btn.disabled = true;
+    status.textContent = "Could not reach the server to check notification support.";
+    return;
+  }
+
+  if (!config.configured) {
+    btn.textContent = "Not set up yet";
+    btn.disabled = true;
+    status.textContent = "Push notifications aren't configured on this server yet.";
+    return;
+  }
+
+  const registration = await navigator.serviceWorker.ready;
+  let subscription = await registration.pushManager.getSubscription();
+  updatePushButton(btn, status, subscription);
+
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try {
+      if (subscription) {
+        await subscription.unsubscribe();
+        await fetch(`/api/push/subscribe/${encodeURIComponent(DEVICE_ID)}`, { method: "DELETE" });
+        subscription = null;
+      } else {
+        const permission = await Notification.requestPermission();
+        if (permission !== "granted") {
+          status.textContent = "Notifications permission was not granted.";
+          btn.disabled = false;
+          return;
+        }
+
+        subscription = await registration.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(config.key),
+        });
+
+        await fetch("/api/push/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            device_id: DEVICE_ID,
+            endpoint: subscription.endpoint,
+            p256dh: arrayBufferToBase64url(subscription.getKey("p256dh")),
+            auth: arrayBufferToBase64url(subscription.getKey("auth")),
+          }),
+        });
+      }
+    } catch (err) {
+      status.textContent = "Something went wrong changing that setting, try again.";
+      console.error(err);
+    }
+    btn.disabled = false;
+    updatePushButton(btn, status, subscription);
+  });
+}
+
+function updatePushButton(btn, status, subscription) {
+  if (subscription) {
+    btn.textContent = "Disable close-game alerts";
+    status.textContent = "On for this device.";
+  } else {
+    btn.textContent = "Enable close-game alerts";
+    status.textContent = "Off for this device.";
   }
 }

@@ -23,6 +23,7 @@ import espn_client
 import favorites
 import leaders
 import news_client
+import push
 from conferences import CONFERENCES_BY_SPORT
 from models import game_to_dict
 
@@ -64,6 +65,13 @@ class RecoverPayload(BaseModel):
     code: str
 
 
+class PushSubscribePayload(BaseModel):
+    device_id: str
+    endpoint: str
+    p256dh: str
+    auth: str
+
+
 def today_str() -> str:
     return date_cls.today().strftime("%Y%m%d")
 
@@ -88,15 +96,22 @@ def refresh_today_scoreboards() -> None:
     is currently live."""
     date = today_str()
     any_live = False
+    games_by_sport = {}
 
     for sport in SPORTS:
         try:
             games = fetch_and_build_scoreboard(sport, date)
             cache.set_cached(scoreboard_cache_key(sport, date), games)
+            games_by_sport[sport] = games
             if any(g["status_state"] == "in" for g in games):
                 any_live = True
         except Exception as exc:
             logger.warning("Background refresh failed for %s: %s", sport, exc)
+
+    try:
+        push.check_and_notify(games_by_sport)
+    except Exception as exc:
+        logger.warning("Close-game notification check failed: %s", exc)
 
     desired_interval = LIVE_POLL_SECONDS if any_live else IDLE_POLL_SECONDS
     job = scheduler.get_job(REFRESH_JOB_ID)
@@ -108,6 +123,7 @@ def refresh_today_scoreboards() -> None:
 def on_startup() -> None:
     cache.init_db()
     favorites.init_tables()
+    push.init_tables()
     scheduler.add_job(
         refresh_today_scoreboards,
         trigger=IntervalTrigger(seconds=LIVE_POLL_SECONDS),
@@ -362,6 +378,25 @@ def recover_device(payload: RecoverPayload) -> dict:
     if not device_id:
         raise HTTPException(status_code=404, detail="Unknown recovery code")
     return {"device_id": device_id}
+
+
+@app.get("/api/push/vapid-public-key")
+def get_vapid_public_key() -> dict:
+    return {"key": push.VAPID_PUBLIC_KEY, "configured": push.is_configured()}
+
+
+@app.post("/api/push/subscribe")
+def subscribe_push(payload: PushSubscribePayload) -> dict:
+    if not push.is_configured():
+        raise HTTPException(status_code=503, detail="Push notifications are not configured on this server")
+    push.save_subscription(payload.device_id, payload.endpoint, payload.p256dh, payload.auth)
+    return {"status": "ok"}
+
+
+@app.delete("/api/push/subscribe/{device_id}")
+def unsubscribe_push(device_id: str) -> dict:
+    push.remove_subscription(device_id)
+    return {"status": "ok"}
 
 
 @app.get("/api/news/sources")
