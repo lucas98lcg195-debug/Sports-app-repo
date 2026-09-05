@@ -7,19 +7,25 @@ signs a message with a VAPID key pair and hands it to pywebpush, which
 encrypts it and delivers it to whichever push service (Apple's,
 Google's, etc.) that subscription belongs to.
 
-Three kinds of alert, each checked independently against every game in
+Four kinds of alert, each checked independently against every game in
 a refresh batch:
 
   "close": 7 points or less with 5 minutes or less left in the 4th
     quarter, football only, any team, nationally.
   "start": a game involving Auburn or Mississippi State just went live.
   "final": a game involving Auburn or Mississippi State just ended.
+  "score": the score changed in a live game involving Auburn or
+    Mississippi State.
 
 Every subscribed device gets every alert that fires, there's no
-per-device favorites scoping. Each device gets exactly one alert per
-game per kind, the first time that kind fires for that game, tracked
-in notified_alerts so the same game/kind pair doesn't re-fire on every
-30-second refresh.
+per-device favorites scoping. Close/start/final each fire at most once
+per game, tracked in notified_alerts so the same game/kind pair doesn't
+re-fire on every 30-second refresh. A score-change alert can fire more
+than once per game, once per distinct score, since the whole point is
+to hear about each change, that's handled by folding the actual score
+into the alert's kind string (see check_and_notify) rather than a
+separate table, so notified_alerts still only ever sends a given exact
+score once per game.
 """
 
 import json
@@ -76,6 +82,16 @@ def init_tables() -> None:
                 kind TEXT NOT NULL,
                 notified_at REAL NOT NULL,
                 PRIMARY KEY (device_id, game_id, kind)
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tracked_game_scores (
+                game_id TEXT PRIMARY KEY,
+                away_score TEXT NOT NULL,
+                home_score TEXT NOT NULL,
+                updated_at REAL NOT NULL
             )
             """
         )
@@ -190,6 +206,48 @@ def is_final_score_alert(game: dict) -> bool:
     return game.get("status_state") == "post" and is_tracked_team_game(game)
 
 
+def _current_scores(game: dict) -> tuple[str, str] | None:
+    teams = {t["home_away"]: t for t in game.get("teams", [])}
+    away, home = teams.get("away"), teams.get("home")
+    if not away or not home:
+        return None
+    away_score, home_score = away.get("score"), home.get("score")
+    if away_score in (None, "") or home_score in (None, ""):
+        return None
+    return (str(away_score), str(home_score))
+
+
+def _get_last_score(game_id: str) -> tuple[str, str] | None:
+    with cache.connect() as conn:
+        row = conn.execute(
+            "SELECT away_score, home_score FROM tracked_game_scores WHERE game_id = ?",
+            (game_id,),
+        ).fetchone()
+    return (row[0], row[1]) if row else None
+
+
+def _set_last_score(game_id: str, away_score: str, home_score: str) -> None:
+    with cache.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO tracked_game_scores (game_id, away_score, home_score, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(game_id) DO UPDATE SET
+                away_score = excluded.away_score,
+                home_score = excluded.home_score,
+                updated_at = excluded.updated_at
+            """,
+            (game_id, away_score, home_score, time.time()),
+        )
+        conn.commit()
+
+
+def _clear_last_score(game_id: str) -> None:
+    with cache.connect() as conn:
+        conn.execute("DELETE FROM tracked_game_scores WHERE game_id = ?", (game_id,))
+        conn.commit()
+
+
 def _build_payload(game: dict, title: str) -> str:
     teams = {t["home_away"]: t for t in game.get("teams", [])}
     away, home = teams.get("away"), teams.get("home")
@@ -240,9 +298,9 @@ def _send(subscription: dict, payload: str) -> bool:
 def check_and_notify(games_by_sport: dict[str, list[dict]]) -> None:
     """Called after each scoreboard refresh with the games that were
     just fetched. Every subscribed device gets every alert that fires
-    out of this batch, close games nationally plus start/final alerts
-    for Auburn and Mississippi State specifically, each one at most
-    once per game."""
+    out of this batch, close games nationally plus start/final/score
+    alerts for Auburn and Mississippi State specifically, each one at
+    most once per game (score alerts: once per distinct score)."""
     if not is_configured():
         return
 
@@ -258,6 +316,16 @@ def check_and_notify(games_by_sport: dict[str, list[dict]]) -> None:
             alerts.append(("start", game, "Game starting"))
         if is_final_score_alert(game):
             alerts.append(("final", game, "Final score"))
+            _clear_last_score(game["id"])
+
+        if game.get("status_state") == "in" and is_tracked_team_game(game):
+            current = _current_scores(game)
+            if current is not None:
+                previous = _get_last_score(game["id"])
+                if previous is not None and previous != current:
+                    kind = f"score:{current[0]}-{current[1]}"
+                    alerts.append((kind, game, "Score update"))
+                _set_last_score(game["id"], current[0], current[1])
 
     if not alerts:
         return
