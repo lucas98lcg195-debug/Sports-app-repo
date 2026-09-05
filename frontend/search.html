@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Search Schools - NCAA Scores</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0b1d33">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-page="search">
+  <header class="app-header">
+    <a class="back-link" href="index.html">&larr; Scoreboard</a>
+  </header>
+  <main>
+    <h1>Search Schools</h1>
+    <input id="search-input" class="search-input" type="search" placeholder="Type a school name..." autofocus>
+    <p id="search-status" class="empty">Loading teams...</p>
+    <div id="search-results" class="search-results"></div>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

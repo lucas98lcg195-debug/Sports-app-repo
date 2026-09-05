@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>News - NCAA Scores</title>
+  <title>Rankings - NCAA Scores</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0b1d33">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="style.css">
 </head>
-<body data-page="news">
+<body data-page="rankings">
   <header class="app-header">
     <div class="header-top">
       <h1>NCAA Scores</h1>
@@ -23,18 +23,19 @@
   </header>
   <nav class="top-nav">
     <a href="index.html">Scores</a>
-    <a href="rankings.html">Rankings</a>
+    <a href="rankings.html" class="active">Rankings</a>
     <a href="standings.html">Standings</a>
-    <a href="news.html" class="active">News</a>
+    <a href="news.html">News</a>
   </nav>
   <main>
     <div class="section-header">
-      <h2>News</h2>
-      <select id="news-source" class="conference-select" aria-label="News source">
-        <option value="">All Sources</option>
-      </select>
+      <h2>AP Top 25</h2>
+      <div class="sub-tabs">
+        <button id="rankings-football-tab" class="sub-tab active">Football</button>
+        <button id="rankings-baseball-tab" class="sub-tab">Baseball</button>
+      </div>
     </div>
-    <div id="news-list" class="news-list">
+    <div id="rankings-list" class="rankings-list">
       <p class="loading">Loading...</p>
     </div>
   </main>

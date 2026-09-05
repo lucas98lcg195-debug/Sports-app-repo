@@ -16,9 +16,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 import cache
 import espn_client
+import favorites
 import news_client
 from conferences import CONFERENCES_BY_SPORT
 from models import game_to_dict
@@ -36,10 +38,25 @@ SCOREBOARD_TTL_SECONDS = 30
 SUMMARY_TTL_SECONDS = 30
 SCHEDULE_TTL_SECONDS = 3600
 NEWS_TTL_SECONDS = 900  # news doesn't need live-score cadence
+RANKINGS_TTL_SECONDS = 3600
+STANDINGS_TTL_SECONDS = 3600
+TEAMS_TTL_SECONDS = 86400  # team lists barely ever change
 
 REFRESH_JOB_ID = "refresh_scoreboards"
 
 scheduler = BackgroundScheduler()
+
+
+class FavoritePayload(BaseModel):
+    device_id: str
+    sport: str
+    team_id: str
+    team_name: str
+    logo: Optional[str] = None
+
+
+class RecoverPayload(BaseModel):
+    code: str
 
 
 def today_str() -> str:
@@ -85,6 +102,7 @@ def refresh_today_scoreboards() -> None:
 @app.on_event("startup")
 def on_startup() -> None:
     cache.init_db()
+    favorites.init_tables()
     scheduler.add_job(
         refresh_today_scoreboards,
         trigger=IntervalTrigger(seconds=LIVE_POLL_SECONDS),
@@ -167,6 +185,97 @@ def get_team_schedule(sport: str, team_id: str) -> dict:
         return cache.get_or_fetch(key, SCHEDULE_TTL_SECONDS, fetch)
     except espn_client.EspnApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/rankings/{sport}")
+def get_rankings(sport: str) -> dict:
+    if sport not in SPORTS:
+        raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
+
+    key = f"rankings:{sport}"
+
+    def fetch() -> list[dict]:
+        raw = espn_client.fetch_rankings_raw(sport)
+        return espn_client.parse_rankings(raw, sport)
+
+    try:
+        ranks = cache.get_or_fetch(key, RANKINGS_TTL_SECONDS, fetch)
+    except espn_client.EspnApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"sport": sport, "ranks": ranks}
+
+
+@app.get("/api/standings/{sport}")
+def get_standings(sport: str, conference: str) -> dict:
+    if sport not in SPORTS:
+        raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
+    if not is_known_conference(sport, conference):
+        raise HTTPException(status_code=404, detail=f"Unknown conference for {sport}: {conference}")
+
+    key = f"standings:{sport}:{conference}"
+
+    def fetch() -> list[dict]:
+        raw = espn_client.fetch_standings_raw(sport, conference)
+        return espn_client.parse_standings(raw)
+
+    try:
+        teams = cache.get_or_fetch(key, STANDINGS_TTL_SECONDS, fetch)
+    except espn_client.EspnApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"sport": sport, "conference": conference, "teams": teams}
+
+
+@app.get("/api/teams/{sport}")
+def get_teams(sport: str) -> dict:
+    if sport not in SPORTS:
+        raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
+
+    key = f"teams:{sport}"
+
+    def fetch() -> list[dict]:
+        raw = espn_client.fetch_teams_raw(sport)
+        return espn_client.parse_teams(raw)
+
+    try:
+        teams = cache.get_or_fetch(key, TEAMS_TTL_SECONDS, fetch)
+    except espn_client.EspnApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"sport": sport, "teams": teams}
+
+
+@app.get("/api/favorites")
+def get_favorites(device_id: str) -> dict:
+    return {"favorites": favorites.list_favorites(device_id)}
+
+
+@app.post("/api/favorites")
+def add_favorite(payload: FavoritePayload) -> dict:
+    if payload.sport not in SPORTS:
+        raise HTTPException(status_code=404, detail=f"Unknown sport: {payload.sport}")
+    favorites.add_favorite(payload.device_id, payload.sport, payload.team_id, payload.team_name, payload.logo)
+    return {"status": "ok"}
+
+
+@app.delete("/api/favorites/{sport}/{team_id}")
+def remove_favorite(sport: str, team_id: str, device_id: str) -> dict:
+    favorites.remove_favorite(device_id, sport, team_id)
+    return {"status": "ok"}
+
+
+@app.get("/api/device/code")
+def get_device_code(device_id: str) -> dict:
+    return {"code": favorites.get_or_create_code(device_id)}
+
+
+@app.post("/api/device/recover")
+def recover_device(payload: RecoverPayload) -> dict:
+    device_id = favorites.resolve_code(payload.code)
+    if not device_id:
+        raise HTTPException(status_code=404, detail="Unknown recovery code")
+    return {"device_id": device_id}
 
 
 @app.get("/api/news/sources")

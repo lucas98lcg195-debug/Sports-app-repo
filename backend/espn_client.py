@@ -278,3 +278,135 @@ def _parse_schedule_event(event: dict, team_id: str) -> dict:
         "status_detail": status_type.get("shortDetail") or status_type.get("detail", ""),
         "result": result,
     }
+
+
+# ---------------------------------------------------------------------------
+# Rankings (AP poll)
+# ---------------------------------------------------------------------------
+
+
+def fetch_rankings_raw(sport: str) -> dict:
+    url = f"{BASE_URL}/{_sport_path(sport)}/rankings"
+    return _get(url)
+
+
+def parse_rankings(raw: dict, sport: str) -> list[dict]:
+    polls = raw.get("rankings") or []
+    if not polls:
+        return []
+
+    ap_poll = None
+    for poll in polls:
+        name = (poll.get("name") or poll.get("shortName") or "").lower()
+        if "ap" in name:
+            ap_poll = poll
+            break
+    if ap_poll is None:
+        ap_poll = polls[0]
+
+    ranks = []
+    for entry in ap_poll.get("ranks", []):
+        try:
+            team_info = entry.get("team", {})
+            logos = team_info.get("logos") or []
+            logo = team_info.get("logo") or (logos[0].get("href") if logos else None)
+            record = entry.get("recordSummary") or (entry.get("record") or {}).get("summary")
+
+            ranks.append(
+                {
+                    "rank": entry.get("current"),
+                    "previous_rank": entry.get("previous"),
+                    "team_id": str(team_info.get("id", "")),
+                    "team_name": team_info.get("displayName") or team_info.get("name", "Unknown"),
+                    "logo": logo,
+                    "record": record,
+                    "points": entry.get("points"),
+                    "first_place_votes": entry.get("firstPlaceVotes"),
+                }
+            )
+        except (KeyError, TypeError) as exc:
+            logger.warning("Skipping malformed rankings entry for %s: %s", sport, exc)
+
+    return ranks
+
+
+# ---------------------------------------------------------------------------
+# Conference standings
+# ---------------------------------------------------------------------------
+
+
+def fetch_standings_raw(sport: str, conference: str) -> dict:
+    url = f"https://site.api.espn.com/apis/v2/sports/{_sport_path(sport)}/standings"
+    return _get(url, {"group": conference})
+
+
+def parse_standings(raw: dict) -> list[dict]:
+    entries = (raw.get("standings") or {}).get("entries") or []
+    # Some responses nest standings a level deeper under "children" (one
+    # per division within the conference) rather than a flat "entries"
+    # list. Fall back to flattening those if the flat list is empty.
+    if not entries:
+        entries = []
+        for child in raw.get("children") or []:
+            entries.extend((child.get("standings") or {}).get("entries") or [])
+
+    teams = []
+    for entry in entries:
+        try:
+            team_info = entry.get("team", {})
+            logos = team_info.get("logos") or []
+            logo = team_info.get("logo") or (logos[0].get("href") if logos else None)
+
+            stats = {}
+            for stat in entry.get("stats", []):
+                label = stat.get("shortDisplayName") or stat.get("name")
+                if label:
+                    stats[label] = stat.get("displayValue")
+
+            teams.append(
+                {
+                    "team_id": str(team_info.get("id", "")),
+                    "team_name": team_info.get("displayName", "Unknown"),
+                    "logo": logo,
+                    "stats": stats,
+                }
+            )
+        except (KeyError, TypeError) as exc:
+            logger.warning("Skipping malformed standings entry: %s", exc)
+
+    return teams
+
+
+# ---------------------------------------------------------------------------
+# Teams list (for search)
+# ---------------------------------------------------------------------------
+
+
+def fetch_teams_raw(sport: str) -> dict:
+    url = f"{BASE_URL}/{_sport_path(sport)}/teams"
+    return _get(url, {"limit": 1000})
+
+
+def parse_teams(raw: dict) -> list[dict]:
+    teams = []
+    sports = raw.get("sports") or []
+    leagues = sports[0].get("leagues") if sports else []
+    league_teams = leagues[0].get("teams") if leagues else []
+
+    for entry in league_teams or []:
+        try:
+            team_info = entry.get("team", {})
+            logos = team_info.get("logos") or []
+            logo = team_info.get("logo") or (logos[0].get("href") if logos else None)
+            teams.append(
+                {
+                    "id": str(team_info.get("id", "")),
+                    "name": team_info.get("displayName", "Unknown"),
+                    "abbreviation": team_info.get("abbreviation", ""),
+                    "logo": logo,
+                }
+            )
+        except (KeyError, TypeError) as exc:
+            logger.warning("Skipping malformed team entry: %s", exc)
+
+    return teams
