@@ -1,4 +1,4 @@
-"""Web Push notifications for close-game alerts.
+"""Web Push notifications for game alerts.
 
 There's no native app and no direct line to Apple's push service here,
 this uses the actual Web Push standard: the browser registers a
@@ -7,13 +7,19 @@ signs a message with a VAPID key pair and hands it to pywebpush, which
 encrypts it and delivers it to whichever push service (Apple's,
 Google's, etc.) that subscription belongs to.
 
-A "close game" is 7 points or less with 5 minutes or less left in the
-4th quarter, football only, checked against a device's own favorited
-teams so a personal alert doesn't turn into a firehose of every close
-game in the country. Each device gets exactly one alert per game, the
-first time it crosses into that territory, tracked in
-notified_close_games so the same game doesn't re-fire every 30 seconds
-while it stays close.
+Three kinds of alert, each checked independently against every game in
+a refresh batch:
+
+  "close": 7 points or less with 5 minutes or less left in the 4th
+    quarter, football only, any team, nationally.
+  "start": a game involving Auburn or Mississippi State just went live.
+  "final": a game involving Auburn or Mississippi State just ended.
+
+Every subscribed device gets every alert that fires, there's no
+per-device favorites scoping. Each device gets exactly one alert per
+game per kind, the first time that kind fires for that game, tracked
+in notified_alerts so the same game/kind pair doesn't re-fire on every
+30-second refresh.
 """
 
 import json
@@ -24,7 +30,6 @@ import time
 from pywebpush import WebPushException, webpush
 
 import cache
-import favorites
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +42,13 @@ VAPID_CLAIM_EMAIL = os.environ.get("VAPID_CLAIM_EMAIL", "mailto:admin@example.co
 CLOSE_GAME_MARGIN = 7
 CLOSE_GAME_SECONDS_REMAINING = 5 * 60
 CLOSE_GAME_PERIOD = 4
+
+# Matched against a team's full name, lowercased, substring match, the
+# same approach news_client.py uses for its relevance filter. Neither
+# name collides with any other Division I school, so a substring match
+# is precise enough without needing team ids, which can also differ
+# between a school's football and baseball programs.
+TRACKED_TEAM_NAMES = ["auburn", "mississippi state"]
 
 
 def is_configured() -> bool:
@@ -58,11 +70,12 @@ def init_tables() -> None:
         )
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS notified_close_games (
+            CREATE TABLE IF NOT EXISTS notified_alerts (
                 device_id TEXT NOT NULL,
                 game_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
                 notified_at REAL NOT NULL,
-                PRIMARY KEY (device_id, game_id)
+                PRIMARY KEY (device_id, game_id, kind)
             )
             """
         )
@@ -98,20 +111,20 @@ def all_subscriptions() -> list[dict]:
     return [{"device_id": r[0], "endpoint": r[1], "p256dh": r[2], "auth": r[3]} for r in rows]
 
 
-def _already_notified(device_id: str, game_id: str) -> bool:
+def _already_notified(device_id: str, game_id: str, kind: str) -> bool:
     with cache.connect() as conn:
         row = conn.execute(
-            "SELECT 1 FROM notified_close_games WHERE device_id = ? AND game_id = ?",
-            (device_id, game_id),
+            "SELECT 1 FROM notified_alerts WHERE device_id = ? AND game_id = ? AND kind = ?",
+            (device_id, game_id, kind),
         ).fetchone()
     return row is not None
 
 
-def _mark_notified(device_id: str, game_id: str) -> None:
+def _mark_notified(device_id: str, game_id: str, kind: str) -> None:
     with cache.connect() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO notified_close_games (device_id, game_id, notified_at) VALUES (?, ?, ?)",
-            (device_id, game_id, time.time()),
+            "INSERT OR IGNORE INTO notified_alerts (device_id, game_id, kind, notified_at) VALUES (?, ?, ?, ?)",
+            (device_id, game_id, kind, time.time()),
         )
         conn.commit()
 
@@ -155,18 +168,45 @@ def is_close_game(game: dict) -> bool:
     return abs(scores[0] - scores[1]) <= CLOSE_GAME_MARGIN
 
 
-def _build_payload(game: dict) -> str:
+def _is_tracked_team(team: dict) -> bool:
+    name = (team.get("name") or "").lower()
+    return any(tracked in name for tracked in TRACKED_TEAM_NAMES)
+
+
+def is_tracked_team_game(game: dict) -> bool:
+    return any(_is_tracked_team(t) for t in game.get("teams") or [])
+
+
+def is_game_start_alert(game: dict) -> bool:
+    """Fires once a tracked team's game is live. Checked against
+    whatever status a refresh happens to see, there's no memory of the
+    previous status here, so if the server was asleep or just restarted
+    while the game was already underway, this fires late, on the first
+    refresh that catches it "in", rather than not at all."""
+    return game.get("status_state") == "in" and is_tracked_team_game(game)
+
+
+def is_final_score_alert(game: dict) -> bool:
+    return game.get("status_state") == "post" and is_tracked_team_game(game)
+
+
+def _build_payload(game: dict, title: str) -> str:
     teams = {t["home_away"]: t for t in game.get("teams", [])}
     away, home = teams.get("away"), teams.get("home")
     away_label = away.get("abbreviation") or away.get("name") if away else "?"
     home_label = home.get("abbreviation") or home.get("name") if home else "?"
-    away_score = away.get("score") if away else "?"
-    home_score = home.get("score") if home else "?"
+    away_score = away.get("score") if away else None
+    home_score = home.get("score") if home else None
+
+    if away_score not in (None, "") and home_score not in (None, ""):
+        body = f"{away_label} {away_score} - {home_score} {home_label} · {game.get('status_detail', '')}"
+    else:
+        body = f"{away_label} at {home_label} · {game.get('status_detail', '')}"
 
     return json.dumps(
         {
-            "title": "Close game",
-            "body": f"{away_label} {away_score} - {home_score} {home_label} · {game.get('status_detail', '')}",
+            "title": title,
+            "body": body,
             "url": f"game.html?sport={game.get('sport')}&gameId={game.get('id')}",
         }
     )
@@ -199,14 +239,27 @@ def _send(subscription: dict, payload: str) -> bool:
 
 def check_and_notify(games_by_sport: dict[str, list[dict]]) -> None:
     """Called after each scoreboard refresh with the games that were
-    just fetched. For every device with a saved subscription, checks
-    that device's own favorited teams against the close games in this
-    batch, and sends one alert per game the first time it qualifies."""
+    just fetched. Every subscribed device gets every alert that fires
+    out of this batch, close games nationally plus start/final alerts
+    for Auburn and Mississippi State specifically, each one at most
+    once per game."""
     if not is_configured():
         return
 
-    close_games = [game for games in games_by_sport.values() for game in games if is_close_game(game)]
-    if not close_games:
+    all_games = [game for games in games_by_sport.values() for game in games]
+    if not all_games:
+        return
+
+    alerts = []  # (kind, game, title)
+    for game in all_games:
+        if is_close_game(game):
+            alerts.append(("close", game, "Close game"))
+        if is_game_start_alert(game):
+            alerts.append(("start", game, "Game starting"))
+        if is_final_score_alert(game):
+            alerts.append(("final", game, "Final score"))
+
+    if not alerts:
         return
 
     subscriptions = all_subscriptions()
@@ -215,16 +268,11 @@ def check_and_notify(games_by_sport: dict[str, list[dict]]) -> None:
 
     for subscription in subscriptions:
         device_id = subscription["device_id"]
-        favorite_team_ids = {f["team_id"] for f in favorites.list_favorites(device_id)}
-        if not favorite_team_ids:
-            continue
 
-        for game in close_games:
+        for kind, game, title in alerts:
             game_id = game["id"]
-            if _already_notified(device_id, game_id):
-                continue
-            if not any(t["id"] in favorite_team_ids for t in game["teams"]):
+            if _already_notified(device_id, game_id, kind):
                 continue
 
-            if _send(subscription, _build_payload(game)):
-                _mark_notified(device_id, game_id)
+            if _send(subscription, _build_payload(game, title)):
+                _mark_notified(device_id, game_id, kind)
