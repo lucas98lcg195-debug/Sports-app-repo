@@ -21,6 +21,7 @@ from pydantic import BaseModel
 import cache
 import espn_client
 import favorites
+import leaders
 import news_client
 from conferences import CONFERENCES_BY_SPORT
 from models import game_to_dict
@@ -44,6 +45,7 @@ TEAMS_TTL_SECONDS = 86400  # team lists barely ever change
 ROSTER_TTL_SECONDS = 21600  # rosters change at most a few times a season
 TEAM_STATS_TTL_SECONDS = 3600
 PLAYER_STATS_TTL_SECONDS = 3600
+TEAM_LEADERS_TTL_SECONDS = 3600
 
 REFRESH_JOB_ID = "refresh_scoreboards"
 
@@ -245,6 +247,30 @@ def get_player_stats(sport: str, player_id: str) -> dict:
         raise HTTPException(status_code=502, detail=str(exc))
 
     return {"sport": sport, "player_id": player_id, "categories": categories}
+
+
+@app.get("/api/team/{sport}/{team_id}/leaders")
+def get_team_leaders(sport: str, team_id: str) -> dict:
+    if sport not in SPORTS:
+        raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
+    if sport != "football":
+        # Passing/rushing/receiving leaders are a football-specific
+        # concept, nothing to compute for baseball.
+        return {"sport": sport, "team_id": team_id, "leaders": {}}
+
+    key = f"leaders:{sport}:{team_id}"
+
+    def fetch() -> dict:
+        raw = espn_client.fetch_roster_raw(sport, team_id)
+        roster = espn_client.parse_roster(raw)
+        return leaders.compute_team_leaders(roster)
+
+    try:
+        result = cache.get_or_fetch(key, TEAM_LEADERS_TTL_SECONDS, fetch)
+    except espn_client.EspnApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"sport": sport, "team_id": team_id, "leaders": result}
 
 
 @app.get("/api/rankings/{sport}")
