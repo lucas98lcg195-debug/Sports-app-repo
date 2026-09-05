@@ -170,6 +170,7 @@ def parse_summary(raw: dict, sport: str, game_id: str) -> dict:
         return {
             "id": str(game_id),
             "sport": sport,
+            "date": competition.get("date", ""),
             "status_state": status_state,
             "status_detail": status_type.get("shortDetail") or status_type.get("detail", ""),
             "broadcast": _parse_broadcast(competition),

@@ -236,25 +236,90 @@ function formatDateLabel(d) {
   return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
+// ESPN's own pre-formatted status text ("Sat 7:00 PM EDT") bakes in
+// Eastern time as a plain string, there's nothing reliable to convert
+// there. Instead, for a game that hasn't started yet, this ignores
+// that string entirely and reformats the game's raw UTC timestamp
+// (every game object already carries one) into Central ourselves,
+// using the IANA zone name rather than a fixed UTC offset so daylight
+// saving is handled automatically instead of drifting an hour off for
+// half the year.
+const DISPLAY_TIME_ZONE = "America/Chicago";
+const DISPLAY_TIME_ZONE_LABEL = "CT";
+
+function formatCentralTime(isoDate) {
+  if (!isoDate) return "";
+  const date = new Date(isoDate);
+  if (Number.isNaN(date.getTime())) return "";
+  const formatted = date.toLocaleString("en-US", {
+    timeZone: DISPLAY_TIME_ZONE,
+    weekday: "short",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `${formatted} ${DISPLAY_TIME_ZONE_LABEL}`;
+}
+
+// Live status ("2nd - 7:32") and final status ("Final") carry no
+// timezone information at all, ESPN's text is fine as-is there. Only
+// a still-scheduled game's start time needs converting.
+function displayGameStatus(game) {
+  if (game.status_state === "pre") {
+    const converted = formatCentralTime(game.date);
+    if (converted) return converted;
+  }
+  return game.status_detail || "";
+}
+
 async function loadScoreboards() {
   document.getElementById("date-label").textContent = formatDateLabel(scoreboardState.date);
   await Promise.all(SPORTS.map((sport) => loadSportScoreboard(sport)));
+}
+
+// "Top 25" isn't a real ESPN conference id, it's a stand-in we filter
+// for ourselves: fetch the day's games unfiltered, then keep only
+// games with a team currently in that sport's AP Top 25, using the
+// same rankings endpoint the Rankings tab already uses.
+const TOP25_FILTER_VALUE = "__top25__";
+const rankedTeamIds = { football: null, baseball: null };
+
+async function ensureRankedTeamIds(sport) {
+  if (rankedTeamIds[sport]) return rankedTeamIds[sport];
+  try {
+    const res = await fetch(`/api/rankings/${sport}`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    rankedTeamIds[sport] = new Set((data.ranks || []).map((r) => r.team_id));
+  } catch (err) {
+    console.warn(`Could not load ${sport} rankings for the Top 25 filter`, err);
+    rankedTeamIds[sport] = new Set();
+  }
+  return rankedTeamIds[sport];
 }
 
 async function loadSportScoreboard(sport) {
   const container = document.getElementById(`${sport}-games`);
   const dateParam = formatDateParam(scoreboardState.date);
   const conference = scoreboardState.conference[sport];
+  const isTop25Filter = conference === TOP25_FILTER_VALUE;
 
   let url = `/api/scoreboard/${sport}?date=${dateParam}`;
-  if (conference) url += `&conference=${encodeURIComponent(conference)}`;
+  if (conference && !isTop25Filter) url += `&conference=${encodeURIComponent(conference)}`;
 
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
-    scoreboardState.gamesBySport[sport] = data.games || [];
-    renderGames(container, data.games, sport);
+    let games = data.games || [];
+
+    if (isTop25Filter) {
+      const ranked = await ensureRankedTeamIds(sport);
+      games = games.filter((game) => game.teams.some((t) => ranked.has(t.id)));
+    }
+
+    scoreboardState.gamesBySport[sport] = games;
+    const emptyMessage = isTop25Filter ? "No ranked teams playing today." : undefined;
+    renderGames(container, games, sport, emptyMessage);
     renderMyTeams();
   } catch (err) {
     container.innerHTML = "";
@@ -263,10 +328,10 @@ async function loadSportScoreboard(sport) {
   }
 }
 
-function renderGames(container, games, sport) {
+function renderGames(container, games, sport, emptyMessage) {
   container.innerHTML = "";
   if (!games || games.length === 0) {
-    container.appendChild(el("p", "empty", "No games scheduled."));
+    container.appendChild(el("p", "empty", emptyMessage || "No games scheduled."));
     return;
   }
   for (const game of games) {
@@ -340,7 +405,7 @@ function buildTeamBlock(team, sport, logoHref) {
 function buildStatusBlock(game) {
   const block = el("div", "status-block");
   if (game.status_state === "in") block.classList.add("live");
-  block.appendChild(el("div", "status-detail", game.status_detail || ""));
+  block.appendChild(el("div", "status-detail", displayGameStatus(game)));
   if (game.broadcast) {
     block.appendChild(el("div", "broadcast", game.broadcast));
   }
@@ -413,7 +478,7 @@ function renderGame(content, data, sport) {
     content.appendChild(strip);
   }
 
-  content.appendChild(el("p", "status-detail", data.status_detail || ""));
+  content.appendChild(el("p", "status-detail", displayGameStatus(data)));
   if (data.broadcast) {
     content.appendChild(el("p", "broadcast", data.broadcast));
   }
@@ -1157,11 +1222,8 @@ function buildScheduleRow(game, sport) {
     row.appendChild(el("div", "team-name", "TBD"));
   }
 
-  const statusLink = el(
-    "a",
-    "schedule-status",
-    game.result ? `${game.result} · ${game.status_detail}` : game.status_detail || ""
-  );
+  const statusText = displayGameStatus(game);
+  const statusLink = el("a", "schedule-status", game.result ? `${game.result} · ${statusText}` : statusText);
   statusLink.href = `game.html?sport=${sport}&gameId=${game.id}`;
   row.appendChild(statusLink);
 
