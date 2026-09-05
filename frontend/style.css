@@ -67,6 +67,12 @@ body {
   font-size: 1rem;
 }
 
+.icon-btn.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
 .back-link {
   color: var(--accent);
   text-decoration: none;
@@ -278,6 +284,79 @@ main {
   color: var(--accent);
   text-decoration: none;
   white-space: nowrap;
+}
+
+/* Compact view: a flat divided list of logo/score rows instead of
+   individually bordered cards. This is purely a CSS restyle, the
+   game-row markup itself never changes between the two views, only
+   this body-level class toggles which rules apply. */
+body.compact-view .game-list {
+  gap: 0;
+}
+
+body.compact-view .game-row {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 4px;
+}
+
+body.compact-view .game-list .game-row:first-child {
+  border-top: 1px solid var(--border);
+}
+
+body.compact-view .team-block {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Both team-blocks share identical markup order (logo, name, star,
+   score), so the second one is flipped to read score-then-logo,
+   producing "Logo Score | Score Logo" symmetric around the divider. */
+body.compact-view .game-row .team-block:last-of-type {
+  flex-direction: row-reverse;
+}
+
+body.compact-view .team-name,
+body.compact-view .fav-star {
+  display: none;
+}
+
+body.compact-view .team-logo {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+body.compact-view .team-score {
+  font-size: 1rem;
+  min-width: 1.2em;
+}
+
+body.compact-view .status-block {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 6px;
+}
+
+body.compact-view .status-detail,
+body.compact-view .broadcast,
+body.compact-view .watch-link {
+  display: none;
+}
+
+body.compact-view .status-block::after {
+  content: "\2013";
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+body.compact-view .status-block.live::after {
+  color: var(--live);
 }
 
 .error {
