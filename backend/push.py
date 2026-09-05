@@ -8,12 +8,11 @@ encrypts it and delivers it to whichever push service (Apple's,
 Google's, etc.) that subscription belongs to.
 
 A "close game" is 7 points or less with 5 minutes or less left in the
-4th quarter, football only, checked against a device's own favorited
-teams so a personal alert doesn't turn into a firehose of every close
-game in the country. Each device gets exactly one alert per game, the
-first time it crosses into that territory, tracked in
-notified_close_games so the same game doesn't re-fire every 30 seconds
-while it stays close.
+4th quarter, football only. Every subscribed device gets an alert for
+every game that qualifies, nationally, not just its own favorited
+teams. Each device gets exactly one alert per game, the first time it
+crosses into that territory, tracked in notified_close_games so the
+same game doesn't re-fire every 30 seconds while it stays close.
 """
 
 import json
@@ -24,7 +23,6 @@ import time
 from pywebpush import WebPushException, webpush
 
 import cache
-import favorites
 
 logger = logging.getLogger(__name__)
 
@@ -199,9 +197,8 @@ def _send(subscription: dict, payload: str) -> bool:
 
 def check_and_notify(games_by_sport: dict[str, list[dict]]) -> None:
     """Called after each scoreboard refresh with the games that were
-    just fetched. For every device with a saved subscription, checks
-    that device's own favorited teams against the close games in this
-    batch, and sends one alert per game the first time it qualifies."""
+    just fetched. Every subscribed device gets an alert for every game
+    in this batch that qualifies as close, the first time it does."""
     if not is_configured():
         return
 
@@ -215,15 +212,10 @@ def check_and_notify(games_by_sport: dict[str, list[dict]]) -> None:
 
     for subscription in subscriptions:
         device_id = subscription["device_id"]
-        favorite_team_ids = {f["team_id"] for f in favorites.list_favorites(device_id)}
-        if not favorite_team_ids:
-            continue
 
         for game in close_games:
             game_id = game["id"]
             if _already_notified(device_id, game_id):
-                continue
-            if not any(t["id"] in favorite_team_ids for t in game["teams"]):
                 continue
 
             if _send(subscription, _build_payload(game)):

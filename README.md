@@ -60,7 +60,7 @@ A button in the scoreboard header, next to search and settings, toggles between 
 
 ## Close-game push notifications
 
-A toggle on `settings.html` turns on a real Web Push notification (not anything native-app-only) for a football game within a touchdown with five minutes or less left in the 4th quarter, scoped to your own favorited teams so it's not a firehose of every close game in the country. One alert per game, the first time it crosses into that territory, never a repeat while it stays close.
+A toggle on `settings.html` turns on a real Web Push notification (not anything native-app-only) for any football game, nationally, within a touchdown with five minutes or less left in the 4th quarter, not scoped to favorited teams. One alert per game, the first time it crosses into that territory, never a repeat while it stays close.
 
 This is genuine browser infrastructure, not a simple toggle: the browser registers a push subscription through the installed service worker, the backend stores it, and when the rule fires, `backend/push.py` signs a message with a VAPID key pair and hands it to `pywebpush`, which encrypts it and delivers it to whichever push service (Apple's, Google's, etc.) that subscription belongs to. The check itself piggybacks on the existing background job that already refreshes live scoreboards every thirty seconds, no extra ESPN polling.
 
