@@ -30,6 +30,12 @@ def _connect():
         conn.close()
 
 
+# Public alias so other modules (favorites.py) that need their own
+# tables in the same SQLite file don't have to open a second connection
+# helper or duplicate the path.
+connect = _connect
+
+
 def init_db() -> None:
     with _connect() as conn:
         conn.execute(

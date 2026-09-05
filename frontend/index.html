@@ -14,7 +14,13 @@
 </head>
 <body data-page="scoreboard">
   <header class="app-header">
-    <h1>NCAA Scores</h1>
+    <div class="header-top">
+      <h1>NCAA Scores</h1>
+      <div class="header-icons">
+        <a href="search.html" class="icon-btn" aria-label="Search teams">🔍</a>
+        <a href="settings.html" class="icon-btn" aria-label="Settings">⚙️</a>
+      </div>
+    </div>
     <div class="date-nav">
       <button id="prev-day" aria-label="Previous day">&lsaquo;</button>
       <span id="date-label"></span>
@@ -24,9 +30,17 @@
   </header>
   <nav class="top-nav">
     <a href="index.html" class="active">Scores</a>
+    <a href="rankings.html">Rankings</a>
+    <a href="standings.html">Standings</a>
     <a href="news.html">News</a>
   </nav>
   <main>
+    <section class="sport-section" id="my-teams-section" hidden>
+      <div class="section-header">
+        <h2>My Teams</h2>
+      </div>
+      <div id="my-teams-games" class="game-list"></div>
+    </section>
     <section class="sport-section">
       <div class="section-header">
         <h2>Football</h2>

@@ -18,6 +18,122 @@ function buildEspnGameUrl(sport, gameId) {
   return `https://www.espn.com/${slug}/game/_/gameId/${gameId}`;
 }
 
+// ---------------------------------------------------------------------------
+// Device identity and favorites
+//
+// No accounts here, just an anonymous id this device generates once and
+// keeps in both localStorage and a cookie (redundant, so losing one
+// doesn't lose the id). Favorites are stored server-side keyed by that
+// id, and a short recovery code (see the settings page) lets the same
+// id be restored on this device later, or adopted by another one.
+// ---------------------------------------------------------------------------
+
+function generateId() {
+  if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+  return "id-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+}
+
+function getCookie(name) {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+
+function setCookie(name, value, days) {
+  const expires = new Date(Date.now() + days * 24 * 60 * 60 * 1000).toUTCString();
+  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/`;
+}
+
+function getOrCreateDeviceId() {
+  try {
+    let id = localStorage.getItem("device_id") || getCookie("device_id");
+    if (!id) id = generateId();
+    localStorage.setItem("device_id", id);
+    setCookie("device_id", id, 365);
+    return id;
+  } catch (err) {
+    console.warn("Could not persist a device id, favorites won't be saved", err);
+    return generateId();
+  }
+}
+
+function setDeviceId(id) {
+  DEVICE_ID = id;
+  try {
+    localStorage.setItem("device_id", id);
+    setCookie("device_id", id, 365);
+  } catch (err) {
+    console.warn("Could not persist the recovered device id", err);
+  }
+}
+
+let DEVICE_ID = getOrCreateDeviceId();
+let favoritesSet = new Set();
+
+async function loadFavorites() {
+  try {
+    const res = await fetch(`/api/favorites?device_id=${encodeURIComponent(DEVICE_ID)}`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    favoritesSet = new Set((data.favorites || []).map((f) => `${f.sport}:${f.team_id}`));
+  } catch (err) {
+    console.warn("Could not load favorites", err);
+  }
+}
+
+function isFavorite(sport, teamId) {
+  return favoritesSet.has(`${sport}:${teamId}`);
+}
+
+async function toggleFavorite(sport, team) {
+  const key = `${sport}:${team.id}`;
+  const nowFavorite = !favoritesSet.has(key);
+  if (nowFavorite) favoritesSet.add(key);
+  else favoritesSet.delete(key);
+
+  try {
+    if (nowFavorite) {
+      await fetch("/api/favorites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          device_id: DEVICE_ID,
+          sport,
+          team_id: team.id,
+          team_name: team.name,
+          logo: team.logo || null,
+        }),
+      });
+    } else {
+      await fetch(`/api/favorites/${sport}/${team.id}?device_id=${encodeURIComponent(DEVICE_ID)}`, {
+        method: "DELETE",
+      });
+    }
+  } catch (err) {
+    console.warn("Could not update favorite", err);
+  }
+  return nowFavorite;
+}
+
+function buildFavoriteStar(sport, team, onChange) {
+  const btn = el("button", "fav-star");
+  btn.type = "button";
+  btn.setAttribute("aria-label", "Toggle favorite team");
+  const active = isFavorite(sport, team.id);
+  btn.textContent = active ? "★" : "☆";
+  btn.classList.toggle("active", active);
+
+  btn.addEventListener("click", async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const nowFavorite = await toggleFavorite(sport, team);
+    btn.textContent = nowFavorite ? "★" : "☆";
+    btn.classList.toggle("active", nowFavorite);
+    if (onChange) onChange();
+  });
+
+  return btn;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   registerServiceWorker();
 
@@ -26,6 +142,10 @@ document.addEventListener("DOMContentLoaded", () => {
   else if (page === "game") initGamePage();
   else if (page === "team") initTeamPage();
   else if (page === "news") initNewsPage();
+  else if (page === "rankings") initRankingsPage();
+  else if (page === "standings") initStandingsPage();
+  else if (page === "search") initSearchPage();
+  else if (page === "settings") initSettingsPage();
 });
 
 function registerServiceWorker() {
@@ -51,9 +171,10 @@ function el(tag, className, text) {
 const scoreboardState = {
   date: new Date(),
   conference: { football: "", baseball: "" },
+  gamesBySport: { football: [], baseball: [] },
 };
 
-function initScoreboardPage() {
+async function initScoreboardPage() {
   document.getElementById("prev-day").addEventListener("click", () => shiftDate(-1));
   document.getElementById("next-day").addEventListener("click", () => shiftDate(1));
   document.getElementById("today-btn").addEventListener("click", () => setDate(new Date()));
@@ -67,6 +188,7 @@ function initScoreboardPage() {
   }
 
   loadConferenceOptions();
+  await loadFavorites();
   loadScoreboards();
   setInterval(loadScoreboards, SCOREBOARD_POLL_MS);
 }
@@ -130,7 +252,9 @@ async function loadSportScoreboard(sport) {
     const res = await fetch(url);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
+    scoreboardState.gamesBySport[sport] = data.games || [];
     renderGames(container, data.games, sport);
+    renderMyTeams();
   } catch (err) {
     container.innerHTML = "";
     container.appendChild(el("p", "error", `Could not load ${sport} scores.`));
@@ -149,19 +273,45 @@ function renderGames(container, games, sport) {
   }
 }
 
+function renderMyTeams() {
+  const section = document.getElementById("my-teams-section");
+  const container = document.getElementById("my-teams-games");
+  if (!section || !container) return;
+
+  const matches = [];
+  for (const sport of SPORTS) {
+    for (const game of scoreboardState.gamesBySport[sport] || []) {
+      if (game.teams.some((t) => isFavorite(sport, t.id))) {
+        matches.push({ game, sport });
+      }
+    }
+  }
+
+  if (matches.length === 0) {
+    section.hidden = true;
+    return;
+  }
+
+  section.hidden = false;
+  container.innerHTML = "";
+  for (const { game, sport } of matches) {
+    container.appendChild(buildGameRow(game, sport));
+  }
+}
+
 function buildGameRow(game, sport) {
   const row = el("div", "game-row");
   const away = game.teams.find((t) => t.home_away === "away") || game.teams[0];
   const home = game.teams.find((t) => t.home_away === "home") || game.teams[1];
 
-  row.appendChild(buildTeamBlock(away, `game.html?sport=${sport}&gameId=${game.id}`));
+  row.appendChild(buildTeamBlock(away, sport, `game.html?sport=${sport}&gameId=${game.id}`));
   row.appendChild(buildStatusBlock(game));
-  row.appendChild(buildTeamBlock(home, `game.html?sport=${sport}&gameId=${game.id}`));
+  row.appendChild(buildTeamBlock(home, sport, `game.html?sport=${sport}&gameId=${game.id}`));
 
   return row;
 }
 
-function buildTeamBlock(team, logoHref) {
+function buildTeamBlock(team, sport, logoHref) {
   const block = el("div", "team-block");
 
   const link = el("a", "team-logo-link");
@@ -175,6 +325,10 @@ function buildTeamBlock(team, logoHref) {
   block.appendChild(link);
 
   block.appendChild(el("div", "team-name", team ? team.abbreviation || team.name : "TBD"));
+
+  if (team) {
+    block.appendChild(buildFavoriteStar(sport, team, renderMyTeams));
+  }
 
   const score = team && team.score !== null && team.score !== undefined ? team.score : "";
   block.appendChild(el("div", "team-score", score));
@@ -205,7 +359,7 @@ function buildWatchLink(sport, gameId) {
 // Game (box score) page
 // ---------------------------------------------------------------------------
 
-function initGamePage() {
+async function initGamePage() {
   const params = new URLSearchParams(window.location.search);
   const sport = params.get("sport");
   const gameId = params.get("gameId");
@@ -216,6 +370,7 @@ function initGamePage() {
     content.appendChild(el("p", "error", "Missing game reference."));
     return;
   }
+  await loadFavorites();
   loadGame(sport, gameId);
 }
 
@@ -273,6 +428,7 @@ function buildGameTeamBlock(team, sport) {
   block.appendChild(link);
 
   block.appendChild(el("div", "team-name", team.name));
+  block.appendChild(buildFavoriteStar(sport, team));
   block.appendChild(el("div", "team-score large", team.score ?? ""));
 
   return block;
@@ -352,7 +508,7 @@ function buildScoringPlaysList(plays) {
 // Team schedule page
 // ---------------------------------------------------------------------------
 
-function initTeamPage() {
+async function initTeamPage() {
   const params = new URLSearchParams(window.location.search);
   const sport = params.get("sport");
   const teamId = params.get("teamId");
@@ -363,6 +519,7 @@ function initTeamPage() {
     content.appendChild(el("p", "error", "Missing team reference."));
     return;
   }
+  await loadFavorites();
   loadTeamSchedule(sport, teamId);
 }
 
@@ -382,7 +539,13 @@ async function loadTeamSchedule(sport, teamId) {
 
 function renderTeamSchedule(content, data, sport) {
   content.innerHTML = "";
-  content.appendChild(el("h1", null, data.team_name || "Team Schedule"));
+
+  const heading = el("div", "team-page-heading");
+  heading.appendChild(el("h1", null, data.team_name || "Team Schedule"));
+  heading.appendChild(
+    buildFavoriteStar(sport, { id: data.team_id, name: data.team_name, logo: null })
+  );
+  content.appendChild(heading);
 
   if (!data.games || data.games.length === 0) {
     content.appendChild(el("p", "empty", "No schedule available."));
@@ -517,4 +680,329 @@ function buildNewsCard(article) {
   card.appendChild(body);
 
   return card;
+}
+
+// ---------------------------------------------------------------------------
+// Rankings page
+// ---------------------------------------------------------------------------
+
+const rankingsState = { sport: "football" };
+
+function initRankingsPage() {
+  for (const sport of SPORTS) {
+    document.getElementById(`rankings-${sport}-tab`).addEventListener("click", () => {
+      rankingsState.sport = sport;
+      updateRankingsSportTabs();
+      loadRankings();
+    });
+  }
+  updateRankingsSportTabs();
+  loadRankings();
+}
+
+function updateRankingsSportTabs() {
+  for (const sport of SPORTS) {
+    document.getElementById(`rankings-${sport}-tab`).classList.toggle("active", rankingsState.sport === sport);
+  }
+}
+
+async function loadRankings() {
+  const list = document.getElementById("rankings-list");
+  list.innerHTML = "";
+  list.appendChild(el("p", "loading", "Loading..."));
+
+  try {
+    const res = await fetch(`/api/rankings/${rankingsState.sport}`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    renderRankings(list, data.ranks);
+  } catch (err) {
+    list.innerHTML = "";
+    list.appendChild(el("p", "error", "Could not load rankings."));
+    console.error(err);
+  }
+}
+
+function renderRankings(list, ranks) {
+  list.innerHTML = "";
+  if (!ranks || ranks.length === 0) {
+    list.appendChild(el("p", "empty", "No rankings available right now."));
+    return;
+  }
+  for (const rank of ranks) {
+    list.appendChild(buildRankRow(rank));
+  }
+}
+
+function buildRankRow(rank) {
+  const row = el("a", "rank-row");
+  row.href = `team.html?sport=${rankingsState.sport}&teamId=${rank.team_id}`;
+
+  row.appendChild(el("div", "rank-number", rank.rank != null ? String(rank.rank) : ""));
+
+  const logo = el("img", "team-logo small");
+  logo.src = rank.logo || "icons/team-placeholder.png";
+  logo.alt = rank.team_name;
+  row.appendChild(logo);
+
+  const body = el("div", "rank-body");
+  body.appendChild(el("div", "team-name", rank.team_name));
+  if (rank.record) body.appendChild(el("div", "rank-record", rank.record));
+  row.appendChild(body);
+
+  row.appendChild(el("div", "rank-trend", buildTrendText(rank)));
+
+  return row;
+}
+
+function buildTrendText(rank) {
+  if (rank.previous_rank == null || rank.rank == null) return "";
+  const delta = rank.previous_rank - rank.rank;
+  if (delta > 0) return `▲${delta}`;
+  if (delta < 0) return `▼${Math.abs(delta)}`;
+  return "—";
+}
+
+// ---------------------------------------------------------------------------
+// Standings page
+// ---------------------------------------------------------------------------
+
+const standingsState = { sport: "football", conference: "" };
+
+function initStandingsPage() {
+  for (const sport of SPORTS) {
+    document.getElementById(`standings-${sport}-tab`).addEventListener("click", () => {
+      standingsState.sport = sport;
+      updateStandingsSportTabs();
+      loadStandingsConferenceOptions();
+    });
+  }
+  document.getElementById("standings-conference").addEventListener("change", (event) => {
+    standingsState.conference = event.target.value;
+    loadStandings();
+  });
+
+  updateStandingsSportTabs();
+  loadStandingsConferenceOptions();
+}
+
+function updateStandingsSportTabs() {
+  for (const sport of SPORTS) {
+    document.getElementById(`standings-${sport}-tab`).classList.toggle("active", standingsState.sport === sport);
+  }
+}
+
+async function loadStandingsConferenceOptions() {
+  const select = document.getElementById("standings-conference");
+  select.innerHTML = "";
+  standingsState.conference = "";
+
+  try {
+    const res = await fetch(`/api/conferences/${standingsState.sport}`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    const conferences = data.conferences || [];
+    for (const conf of conferences) {
+      const option = document.createElement("option");
+      option.value = conf.id;
+      option.textContent = conf.name;
+      select.appendChild(option);
+    }
+    if (conferences.length > 0) {
+      standingsState.conference = conferences[0].id;
+    }
+  } catch (err) {
+    console.warn("Could not load conferences for standings", err);
+  }
+
+  loadStandings();
+}
+
+async function loadStandings() {
+  const list = document.getElementById("standings-list");
+  list.innerHTML = "";
+
+  if (!standingsState.conference) {
+    list.appendChild(el("p", "empty", "Pick a conference to see standings."));
+    return;
+  }
+  list.appendChild(el("p", "loading", "Loading..."));
+
+  try {
+    const res = await fetch(
+      `/api/standings/${standingsState.sport}?conference=${encodeURIComponent(standingsState.conference)}`
+    );
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    renderStandings(list, data.teams);
+  } catch (err) {
+    list.innerHTML = "";
+    list.appendChild(el("p", "error", "Could not load standings."));
+    console.error(err);
+  }
+}
+
+function renderStandings(list, teams) {
+  list.innerHTML = "";
+  if (!teams || teams.length === 0) {
+    list.appendChild(el("p", "empty", "No standings available right now."));
+    return;
+  }
+
+  const statNames = new Set();
+  for (const team of teams) {
+    Object.keys(team.stats || {}).forEach((name) => statNames.add(name));
+  }
+
+  const table = el("table", "standings-table");
+  const headRow = document.createElement("tr");
+  headRow.appendChild(document.createElement("th"));
+  for (const statName of statNames) {
+    headRow.appendChild(el("th", null, statName));
+  }
+  table.appendChild(headRow);
+
+  for (const team of teams) {
+    const row = document.createElement("tr");
+
+    const teamCell = el("td", "standings-team-cell");
+    const link = el("a", "standings-team-link");
+    link.href = `team.html?sport=${standingsState.sport}&teamId=${team.team_id}`;
+    const logo = el("img", "team-logo small");
+    logo.src = team.logo || "icons/team-placeholder.png";
+    logo.alt = team.team_name;
+    link.appendChild(logo);
+    link.appendChild(el("span", null, team.team_name));
+    teamCell.appendChild(link);
+    row.appendChild(teamCell);
+
+    for (const statName of statNames) {
+      row.appendChild(el("td", null, (team.stats || {})[statName] ?? ""));
+    }
+    table.appendChild(row);
+  }
+
+  list.appendChild(table);
+}
+
+// ---------------------------------------------------------------------------
+// Search page
+// ---------------------------------------------------------------------------
+
+let searchTeams = [];
+
+function initSearchPage() {
+  document.getElementById("search-input").addEventListener("input", (event) => {
+    renderSearchResults(event.target.value);
+  });
+  loadSearchTeams();
+}
+
+async function loadSearchTeams() {
+  const status = document.getElementById("search-status");
+  status.textContent = "Loading teams...";
+
+  try {
+    const bySport = await Promise.all(
+      SPORTS.map(async (sport) => {
+        const res = await fetch(`/api/teams/${sport}`);
+        if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+        const data = await res.json();
+        return (data.teams || []).map((t) => ({ ...t, sport }));
+      })
+    );
+    searchTeams = bySport.flat();
+    status.textContent = searchTeams.length > 0 ? "Start typing to search." : "No teams available right now.";
+  } catch (err) {
+    status.textContent = "Could not load the team list.";
+    console.error(err);
+  }
+}
+
+function renderSearchResults(query) {
+  const list = document.getElementById("search-results");
+  list.innerHTML = "";
+
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return;
+
+  const matches = searchTeams
+    .filter((t) => t.name.toLowerCase().includes(trimmed) || t.abbreviation.toLowerCase().includes(trimmed))
+    .slice(0, 30);
+
+  if (matches.length === 0) {
+    list.appendChild(el("p", "empty", "No matching schools."));
+    return;
+  }
+  for (const team of matches) {
+    list.appendChild(buildSearchResultRow(team));
+  }
+}
+
+function buildSearchResultRow(team) {
+  const row = el("a", "search-result");
+  row.href = `team.html?sport=${team.sport}&teamId=${team.id}`;
+
+  const logo = el("img", "team-logo small");
+  logo.src = team.logo || "icons/team-placeholder.png";
+  logo.alt = team.name;
+  row.appendChild(logo);
+
+  const body = el("div", "search-result-body");
+  body.appendChild(el("div", "team-name", team.name));
+  body.appendChild(el("div", "search-result-sport", team.sport));
+  row.appendChild(body);
+
+  return row;
+}
+
+// ---------------------------------------------------------------------------
+// Settings page (device recovery code)
+// ---------------------------------------------------------------------------
+
+function initSettingsPage() {
+  loadDeviceCode();
+
+  document.getElementById("recover-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = document.getElementById("recover-input");
+    const status = document.getElementById("recover-status");
+    const code = input.value.trim();
+    if (!code) return;
+
+    status.textContent = "Checking...";
+    try {
+      const res = await fetch("/api/device/recover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ code }),
+      });
+      if (!res.ok) {
+        status.textContent = "That code wasn't found.";
+        return;
+      }
+      const data = await res.json();
+      setDeviceId(data.device_id);
+      status.textContent = "Linked. Your favorites from that device are now here.";
+      input.value = "";
+      loadDeviceCode();
+    } catch (err) {
+      status.textContent = "Could not check that code, try again.";
+      console.error(err);
+    }
+  });
+}
+
+async function loadDeviceCode() {
+  const codeEl = document.getElementById("device-code");
+  codeEl.textContent = "Loading...";
+  try {
+    const res = await fetch(`/api/device/code?device_id=${encodeURIComponent(DEVICE_ID)}`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    codeEl.textContent = data.code;
+  } catch (err) {
+    codeEl.textContent = "Unavailable";
+    console.error(err);
+  }
 }
