@@ -657,3 +657,55 @@ main {
   font-size: 0.75rem;
   color: var(--text-dim);
 }
+
+.team-highlights {
+  margin-bottom: 16px;
+}
+
+.highlight-tiles {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.highlight-tile {
+  flex: 1 0 100px;
+  min-width: 100px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.highlight-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.highlight-label {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-top: 2px;
+}
+
+.highlight-sub {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.leader-tile .highlight-value {
+  color: var(--accent);
+}
+
+#player-key-stats:not(:empty) {
+  margin-bottom: 16px;
+}

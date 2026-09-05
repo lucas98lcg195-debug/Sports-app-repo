@@ -521,8 +521,8 @@ const teamPageState = {
   teamName: null,
   section: "schedule",
   bySport: {
-    football: { teamId: null, resolved: false, name: null, schedule: null, stats: null, roster: null },
-    baseball: { teamId: null, resolved: false, name: null, schedule: null, stats: null, roster: null },
+    football: { teamId: null, resolved: false, name: null, schedule: null, stats: null, roster: null, leaders: null },
+    baseball: { teamId: null, resolved: false, name: null, schedule: null, stats: null, roster: null, leaders: null },
   },
 };
 
@@ -648,8 +648,8 @@ async function renderTeamSection() {
     await ensureScheduleLoaded(sport);
     renderScheduleSection(content, entry, sport);
   } else if (teamPageState.section === "stats") {
-    await ensureStatsLoaded(sport);
-    renderStatsSection(content, entry);
+    await Promise.all([ensureScheduleLoaded(sport), ensureStatsLoaded(sport), ensureLeadersLoaded(sport)]);
+    renderStatsSection(content, entry, sport);
   } else if (teamPageState.section === "roster") {
     await ensureRosterLoaded(sport);
     renderRosterSection(content, entry, sport);
@@ -686,6 +686,20 @@ async function ensureStatsLoaded(sport) {
   }
 }
 
+async function ensureLeadersLoaded(sport) {
+  const entry = teamPageState.bySport[sport];
+  if (entry.leaders || !entry.teamId) return;
+  try {
+    const res = await fetch(`/api/team/${sport}/${entry.teamId}/leaders`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    entry.leaders = data.leaders || {};
+  } catch (err) {
+    entry.leaders = {};
+    console.warn(`Could not load ${sport} team leaders`, err);
+  }
+}
+
 async function ensureRosterLoaded(sport) {
   const entry = teamPageState.bySport[sport];
   if (entry.roster || !entry.teamId) return;
@@ -714,8 +728,221 @@ function renderScheduleSection(content, entry, sport) {
   content.appendChild(list);
 }
 
-function renderStatsSection(content, entry) {
-  renderStatCategories(content, entry.stats || [], "No team stats available right now.");
+function renderStatsSection(content, entry, sport) {
+  content.innerHTML = "";
+
+  const highlights = buildTeamHighlights(entry, sport);
+  if (highlights) content.appendChild(highlights);
+
+  const categoriesContainer = el("div");
+  content.appendChild(categoriesContainer);
+  renderStatCategories(categoriesContainer, entry.stats || [], "No team stats available right now.");
+}
+
+// ---------------------------------------------------------------------------
+// Highlight tiles: a team's win record and statistical leaders, or a
+// player's position-specific headline numbers. Both render as the
+// same small tile row, just built from different data.
+// ---------------------------------------------------------------------------
+
+function buildHighlightTile(label, value, sub) {
+  const tile = el("div", "highlight-tile");
+  tile.appendChild(el("div", "highlight-value", value));
+  tile.appendChild(el("div", "highlight-label", label));
+  if (sub) tile.appendChild(el("div", "highlight-sub", sub));
+  return tile;
+}
+
+function computeRecord(schedule) {
+  const decided = (schedule || []).filter((g) => g.result === "W" || g.result === "L");
+  if (decided.length === 0) return null;
+  const wins = decided.filter((g) => g.result === "W").length;
+  return { wins, losses: decided.length - wins, pct: wins / decided.length };
+}
+
+function buildTeamHighlights(entry, sport) {
+  const tiles = el("div", "highlight-tiles");
+
+  const record = computeRecord(entry.schedule);
+  if (record) {
+    tiles.appendChild(buildHighlightTile("Win %", `${Math.round(record.pct * 100)}%`, `${record.wins}-${record.losses}`));
+  }
+
+  // Passing/rushing/receiving leaders are a football-specific concept,
+  // the backend only computes them for that sport.
+  if (sport === "football" && entry.leaders) {
+    const leaderSpecs = [
+      { key: "passing", label: "Passing Leader" },
+      { key: "rushing", label: "Rushing Leader" },
+      { key: "receiving", label: "Receiving Leader" },
+    ];
+    for (const spec of leaderSpecs) {
+      const leader = entry.leaders[spec.key];
+      if (leader) tiles.appendChild(buildLeaderTile(spec.label, leader, sport, entry.teamId));
+    }
+  }
+
+  if (tiles.children.length === 0) return null;
+  const wrapper = el("div", "team-highlights");
+  wrapper.appendChild(tiles);
+  return wrapper;
+}
+
+function buildLeaderTile(label, leader, sport, teamId) {
+  const params = new URLSearchParams({
+    sport,
+    teamId: teamId || "",
+    playerId: leader.id,
+    name: leader.name || "",
+    jersey: leader.jersey || "",
+    position: leader.position || "",
+    headshot: leader.headshot || "",
+    height: leader.height || "",
+    weight: leader.weight || "",
+    playerClass: leader.class || "",
+  });
+
+  const tile = el("a", "highlight-tile leader-tile");
+  tile.href = `player.html?${params.toString()}`;
+  tile.appendChild(el("div", "highlight-value", leader.value != null ? `${leader.value} yds` : ""));
+  tile.appendChild(el("div", "highlight-label", label));
+  tile.appendChild(el("div", "highlight-sub", leader.name));
+  return tile;
+}
+
+// Position-specific headline stats shown under a player's photo. Only
+// the QB entries (Passing/Rushing labels) are confirmed against real
+// ESPN data; the rest follow the same naming convention as a
+// best-effort guess and may need a label adjusted once seen against a
+// real player at that position. A position with no curated list here,
+// or one where none of its listed stats are actually present (offensive
+// linemen typically have no individually tracked stats at all), simply
+// shows nothing, the full stat tables below still render whatever ESPN
+// does provide.
+const POSITION_GROUPS = {
+  QB: "QB",
+  RB: "RB",
+  FB: "RB",
+  HB: "RB",
+  WR: "WR",
+  TE: "TE",
+  OT: "OL",
+  OG: "OL",
+  OL: "OL",
+  C: "OL",
+  G: "OL",
+  T: "OL",
+  DT: "DL",
+  DE: "DL",
+  DL: "DL",
+  NT: "DL",
+  LB: "LB",
+  ILB: "LB",
+  OLB: "LB",
+  MLB: "LB",
+  CB: "DB",
+  S: "DB",
+  FS: "DB",
+  SS: "DB",
+  DB: "DB",
+  K: "K",
+  PK: "K",
+  P: "P",
+};
+
+const POSITION_KEY_STATS = {
+  QB: [
+    { display: "Total Yards", compute: "sum", labels: ["Passing Yards", "Rushing Yards"] },
+    { display: "Comp %", labels: ["Completion Percentage"] },
+    { display: "TD:INT", compute: "ratio", labels: ["Passing Touchdowns", "Interceptions"] },
+  ],
+  RB: [
+    { display: "Rushing Yards", labels: ["Rushing Yards"] },
+    { display: "Yards/Carry", labels: ["Yards Per Rush Attempt"] },
+    { display: "Rushing TDs", labels: ["Rushing Touchdowns"] },
+    { display: "Receiving Yards", labels: ["Receiving Yards"] },
+  ],
+  WR: [
+    { display: "Receiving Yards", labels: ["Receiving Yards"] },
+    { display: "Receptions", labels: ["Receptions"] },
+    { display: "Yards/Catch", labels: ["Yards Per Reception"] },
+    { display: "Receiving TDs", labels: ["Receiving Touchdowns"] },
+  ],
+  TE: [
+    { display: "Receiving Yards", labels: ["Receiving Yards"] },
+    { display: "Receptions", labels: ["Receptions"] },
+    { display: "Receiving TDs", labels: ["Receiving Touchdowns"] },
+  ],
+  DL: [
+    { display: "Total Tackles", labels: ["Total Tackles"] },
+    { display: "Sacks", labels: ["Sacks"] },
+    { display: "Tackles For Loss", labels: ["Tackles For Loss"] },
+  ],
+  LB: [
+    { display: "Total Tackles", labels: ["Total Tackles"] },
+    { display: "Sacks", labels: ["Sacks"] },
+    { display: "Interceptions", labels: ["Interceptions"] },
+    { display: "Tackles For Loss", labels: ["Tackles For Loss"] },
+  ],
+  DB: [
+    { display: "Interceptions", labels: ["Interceptions"] },
+    { display: "Passes Defended", labels: ["Passes Defended"] },
+    { display: "Total Tackles", labels: ["Total Tackles"] },
+  ],
+  K: [
+    { display: "FG Made", labels: ["Field Goals Made"] },
+    { display: "FG %", labels: ["Field Goal Percentage"] },
+    { display: "Long", labels: ["Long Field Goal Made"] },
+  ],
+  P: [
+    { display: "Punts", labels: ["Punts"] },
+    { display: "Yards/Punt", labels: ["Yards Per Punt"] },
+    { display: "Long", labels: ["Long Punt"] },
+  ],
+};
+
+function findStatValue(categories, label) {
+  for (const category of categories || []) {
+    for (const stat of category.stats || []) {
+      if (stat.label === label) return stat.value;
+    }
+  }
+  return null;
+}
+
+function computeKeyStat(spec, categories) {
+  const values = spec.labels.map((label) => findStatValue(categories, label));
+  if (values.some((v) => v === null || v === undefined)) return null;
+
+  if (spec.compute === "sum") {
+    const nums = values.map(Number);
+    if (nums.some((n) => Number.isNaN(n))) return null;
+    return String(nums.reduce((a, b) => a + b, 0));
+  }
+  if (spec.compute === "ratio") {
+    return `${values[0]}:${values[1]}`;
+  }
+  return values[0];
+}
+
+function renderPlayerKeyStats(container, position, categories) {
+  container.innerHTML = "";
+  const group = POSITION_GROUPS[(position || "").toUpperCase()];
+  const specs = group ? POSITION_KEY_STATS[group] : null;
+  if (!specs) return;
+
+  const found = [];
+  for (const spec of specs) {
+    const value = computeKeyStat(spec, categories);
+    if (value !== null) found.push({ spec, value });
+  }
+  if (found.length === 0) return;
+
+  const row = el("div", "highlight-tiles");
+  for (const { spec, value } of found.slice(0, 5)) {
+    row.appendChild(buildHighlightTile(spec.display, value));
+  }
+  container.appendChild(row);
 }
 
 // Shared by the team stats sub-tab and the individual player page,
@@ -1267,7 +1494,7 @@ function initPlayerPage() {
     playerClass: params.get("playerClass"),
   });
 
-  loadPlayerStats(sport, playerId);
+  loadPlayerStats(sport, playerId, params.get("position"));
 }
 
 function renderPlayerBio(player) {
@@ -1288,7 +1515,7 @@ function renderPlayerBio(player) {
   document.getElementById("player-meta").textContent = metaParts.join(" · ");
 }
 
-async function loadPlayerStats(sport, playerId) {
+async function loadPlayerStats(sport, playerId, position) {
   const content = document.getElementById("player-stats-area");
   content.innerHTML = "";
   content.appendChild(el("p", "loading", "Loading stats..."));
@@ -1297,6 +1524,7 @@ async function loadPlayerStats(sport, playerId) {
     const res = await fetch(`/api/player/${sport}/${playerId}/stats`);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
+    renderPlayerKeyStats(document.getElementById("player-key-stats"), position, data.categories);
     renderStatCategories(content, data.categories, "No stats available for this player right now.");
   } catch (err) {
     content.innerHTML = "";
