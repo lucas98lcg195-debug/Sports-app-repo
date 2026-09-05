@@ -182,6 +182,13 @@ async function initScoreboardPage() {
 
   initCompactViewToggle();
 
+  // Fire-and-forget: silently re-registers an existing push
+  // subscription with the backend on every visit to the scores page,
+  // the page actually opened regularly, so alerts recover on their
+  // own after a redeploy resets the backend's subscription storage,
+  // without requiring a special trip back to settings.html.
+  getAndResyncPushSubscription();
+
   for (const sport of SPORTS) {
     const select = document.getElementById(`${sport}-conference`);
     select.addEventListener("change", () => {
@@ -1787,6 +1794,44 @@ function arrayBufferToBase64url(buffer) {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
+function postPushSubscription(subscription) {
+  return fetch("/api/push/subscribe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      device_id: DEVICE_ID,
+      endpoint: subscription.endpoint,
+      p256dh: arrayBufferToBase64url(subscription.getKey("p256dh")),
+      auth: arrayBufferToBase64url(subscription.getKey("auth")),
+    }),
+  });
+}
+
+// The backend's subscription storage can be lost independently of the
+// browser's own copy, most notably on a redeploy: there's no
+// persistent disk attached, so every fresh deploy starts with an
+// empty SQLite file and no memory of who was subscribed. The browser
+// still holds its own subscription fine, so from its side everything
+// looks "on", but the server has nothing to send to and nothing ever
+// arrives, silently. Calling this on every page load re-posts an
+// already-existing browser subscription unconditionally, a no-op when
+// the backend already has it (save_subscription upserts by device
+// id), a silent repair when it doesn't.
+async function getAndResyncPushSubscription() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return null;
+  const registration = await navigator.serviceWorker.ready;
+  const subscription = await registration.pushManager.getSubscription();
+  if (subscription) {
+    try {
+      await postPushSubscription(subscription);
+    } catch (err) {
+      // Best-effort repair, not fatal, the next page load tries again.
+      console.warn("Could not resync push subscription with the server", err);
+    }
+  }
+  return subscription;
+}
+
 async function initPushToggle() {
   const btn = document.getElementById("push-toggle-btn");
   const status = document.getElementById("push-status");
@@ -1817,7 +1862,7 @@ async function initPushToggle() {
   }
 
   const registration = await navigator.serviceWorker.ready;
-  let subscription = await registration.pushManager.getSubscription();
+  let subscription = await getAndResyncPushSubscription();
   updatePushButton(btn, status, subscription);
 
   btn.addEventListener("click", async () => {
@@ -1840,16 +1885,7 @@ async function initPushToggle() {
           applicationServerKey: urlBase64ToUint8Array(config.key),
         });
 
-        await fetch("/api/push/subscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            device_id: DEVICE_ID,
-            endpoint: subscription.endpoint,
-            p256dh: arrayBufferToBase64url(subscription.getKey("p256dh")),
-            auth: arrayBufferToBase64url(subscription.getKey("auth")),
-          }),
-        });
+        await postPushSubscription(subscription);
       }
     } catch (err) {
       status.textContent = "Something went wrong changing that setting, try again.";
