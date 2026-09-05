@@ -87,7 +87,25 @@ main {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-dim);
-  margin: 0 0 8px;
+  margin: 0;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.conference-select {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  max-width: 50%;
 }
 
 .game-list {
@@ -170,6 +188,13 @@ main {
 .status-block.live .status-detail {
   color: var(--live);
   font-weight: 700;
+}
+
+.broadcast {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  margin-top: 2px;
 }
 
 .error {

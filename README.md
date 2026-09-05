@@ -14,7 +14,9 @@ Install the backend dependencies with `pip install -r backend/requirements.txt`,
 
 ## API routes
 
-`GET /api/health` returns a simple status check. `GET /api/scoreboard/{sport}` returns today's games for `football` or `baseball`, or a specific day when given an optional `date` query parameter in `YYYYMMDD` form. `GET /api/game/{sport}/{gameId}` returns box score data for a single game, including the line score, team stats, and scoring plays where ESPN provides them. `GET /api/team/{sport}/{teamId}/schedule` returns a team's full season schedule.
+`GET /api/health` returns a simple status check. `GET /api/scoreboard/{sport}` returns today's games for `football` or `baseball`, or a specific day when given an optional `date` query parameter in `YYYYMMDD` form, each game including the TV or streaming channel it's on where ESPN reports one. An optional `conference` query parameter scopes the results to one conference, using the id ESPN itself assigns that conference. `GET /api/conferences/{sport}` lists the conferences available for that sport's dropdown, each with the id the scoreboard route expects. `GET /api/game/{sport}/{gameId}` returns box score data for a single game, including the line score, team stats, and scoring plays where ESPN provides them. `GET /api/team/{sport}/{teamId}/schedule` returns a team's full season schedule.
+
+The conference list is a small static table in `backend/conferences.py` rather than something read from ESPN, since ESPN's scoreboard and summary payloads never name a game's conference back to the caller. The football ids are well established. The baseball list only covers the conferences shared with football, since the smaller baseball-only conferences are harder to confirm without hitting ESPN directly. Add to either list in that file if a conference is missing.
 
 ## Deploying
 

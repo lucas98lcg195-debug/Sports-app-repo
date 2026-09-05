@@ -51,13 +51,13 @@ def _get(url: str, params: dict | None = None) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def fetch_scoreboard_raw(sport: str, date: str | None = None, fbs_only: bool = False) -> dict:
+def fetch_scoreboard_raw(sport: str, date: str | None = None, groups: str | None = None) -> dict:
     url = f"{BASE_URL}/{_sport_path(sport)}/scoreboard"
     params = {}
     if date:
         params["dates"] = date
-    if fbs_only and sport == "football":
-        params["groups"] = 80
+    if groups:
+        params["groups"] = groups
     return _get(url, params)
 
 
@@ -90,8 +90,25 @@ def _parse_event(event: dict, sport: str) -> Game:
         period=status.get("period"),
         clock=status.get("displayClock"),
         venue=venue,
+        broadcast=_parse_broadcast(competition),
         teams=teams,
     )
+
+
+def _parse_broadcast(competition: dict) -> str | None:
+    names = []
+    for broadcast in competition.get("broadcasts") or []:
+        names.extend(broadcast.get("names") or [])
+    if not names:
+        for geo_broadcast in competition.get("geoBroadcasts") or []:
+            name = (geo_broadcast.get("media") or {}).get("shortName")
+            if name:
+                names.append(name)
+    if not names:
+        return None
+    # Dedupe while preserving order, ESPN sometimes repeats a network
+    # once per market (national, regional, streaming, ...).
+    return ", ".join(dict.fromkeys(names))
 
 
 def _parse_team(competitor: dict) -> Team:
@@ -135,6 +152,7 @@ def parse_summary(raw: dict, sport: str, game_id: str) -> dict:
             "sport": sport,
             "status_state": status_type.get("state", "pre"),
             "status_detail": status_type.get("shortDetail") or status_type.get("detail", ""),
+            "broadcast": _parse_broadcast(competition),
             "teams": teams,
             "team_stats": _parse_team_stats(raw),
             "scoring_plays": _parse_scoring_plays(raw),

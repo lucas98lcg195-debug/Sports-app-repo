@@ -19,6 +19,7 @@ from fastapi.staticfiles import StaticFiles
 
 import cache
 import espn_client
+from conferences import CONFERENCES_BY_SPORT
 from models import game_to_dict
 
 logging.basicConfig(level=logging.INFO)
@@ -43,14 +44,18 @@ def today_str() -> str:
     return date_cls.today().strftime("%Y%m%d")
 
 
-def scoreboard_cache_key(sport: str, date: str) -> str:
-    return f"scoreboard:{sport}:{date}"
+def scoreboard_cache_key(sport: str, date: str, conference: Optional[str] = None) -> str:
+    return f"scoreboard:{sport}:{date}:{conference or 'all'}"
 
 
-def fetch_and_build_scoreboard(sport: str, date: str) -> list[dict]:
-    raw = espn_client.fetch_scoreboard_raw(sport, date=date)
+def fetch_and_build_scoreboard(sport: str, date: str, conference: Optional[str] = None) -> list[dict]:
+    raw = espn_client.fetch_scoreboard_raw(sport, date=date, groups=conference)
     games = espn_client.parse_scoreboard(raw, sport)
     return [game_to_dict(g) for g in games]
+
+
+def is_known_conference(sport: str, conference: str) -> bool:
+    return any(c["id"] == conference for c in CONFERENCES_BY_SPORT.get(sport, []))
 
 
 def refresh_today_scoreboards() -> None:
@@ -99,24 +104,33 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.get("/api/scoreboard/{sport}")
-def get_scoreboard(sport: str, date: Optional[str] = None) -> dict:
+@app.get("/api/conferences/{sport}")
+def get_conferences(sport: str) -> dict:
     if sport not in SPORTS:
         raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
+    return {"sport": sport, "conferences": CONFERENCES_BY_SPORT.get(sport, [])}
+
+
+@app.get("/api/scoreboard/{sport}")
+def get_scoreboard(sport: str, date: Optional[str] = None, conference: Optional[str] = None) -> dict:
+    if sport not in SPORTS:
+        raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
+    if conference and not is_known_conference(sport, conference):
+        raise HTTPException(status_code=404, detail=f"Unknown conference for {sport}: {conference}")
 
     target_date = date or today_str()
-    key = scoreboard_cache_key(sport, target_date)
+    key = scoreboard_cache_key(sport, target_date, conference)
 
     try:
         games = cache.get_or_fetch(
             key,
             SCOREBOARD_TTL_SECONDS,
-            lambda: fetch_and_build_scoreboard(sport, target_date),
+            lambda: fetch_and_build_scoreboard(sport, target_date, conference),
         )
     except espn_client.EspnApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
-    return {"sport": sport, "date": target_date, "games": games}
+    return {"sport": sport, "date": target_date, "conference": conference, "games": games}
 
 
 @app.get("/api/game/{sport}/{game_id}")

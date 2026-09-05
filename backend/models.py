@@ -1,7 +1,7 @@
 """Data classes describing the shapes we hand back to the frontend.
 
 These are intentionally small. ESPN's raw payloads carry a lot more than
-we need (articles, odds, broadcast info, etc.), so espn_client.py trims
+we need (articles, odds, betting lines, etc.), so espn_client.py trims
 everything down to these shapes before it ever reaches a route.
 """
 
@@ -31,6 +31,7 @@ class Game:
     period: Optional[int]
     clock: Optional[str]
     venue: Optional[str]
+    broadcast: Optional[str]
     teams: list = field(default_factory=list)
 
 
