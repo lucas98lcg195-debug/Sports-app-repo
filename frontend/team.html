@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Team Schedule - NCAA Scores</title>
+  <title>Team - NCAA Scores</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#0b1d33">
   <link rel="apple-touch-icon" href="icons/icon-192.png">
@@ -15,8 +15,26 @@
   <header class="app-header">
     <a class="back-link" href="index.html">&larr; Scoreboard</a>
   </header>
-  <main id="team-content">
-    <p class="loading">Loading schedule...</p>
+  <main>
+    <div class="team-page-heading">
+      <h1 id="team-heading">Loading...</h1>
+      <span id="team-star-container"></span>
+    </div>
+
+    <div class="sub-tabs">
+      <button id="team-sport-football" class="sub-tab">Football</button>
+      <button id="team-sport-baseball" class="sub-tab">Baseball</button>
+    </div>
+
+    <div class="sub-tabs section-tabs">
+      <button id="team-section-schedule" class="sub-tab active">Schedule</button>
+      <button id="team-section-stats" class="sub-tab">Stats</button>
+      <button id="team-section-roster" class="sub-tab">Roster</button>
+    </div>
+
+    <div id="team-content-area">
+      <p class="loading">Loading...</p>
+    </div>
   </main>
   <script src="app.js"></script>
 </body>

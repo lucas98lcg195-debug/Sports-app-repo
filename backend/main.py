@@ -41,6 +41,8 @@ NEWS_TTL_SECONDS = 900  # news doesn't need live-score cadence
 RANKINGS_TTL_SECONDS = 3600
 STANDINGS_TTL_SECONDS = 3600
 TEAMS_TTL_SECONDS = 86400  # team lists barely ever change
+ROSTER_TTL_SECONDS = 21600  # rosters change at most a few times a season
+TEAM_STATS_TTL_SECONDS = 3600
 
 REFRESH_JOB_ID = "refresh_scoreboards"
 
@@ -185,6 +187,44 @@ def get_team_schedule(sport: str, team_id: str) -> dict:
         return cache.get_or_fetch(key, SCHEDULE_TTL_SECONDS, fetch)
     except espn_client.EspnApiError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.get("/api/team/{sport}/{team_id}/roster")
+def get_team_roster(sport: str, team_id: str) -> dict:
+    if sport not in SPORTS:
+        raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
+
+    key = f"roster:{sport}:{team_id}"
+
+    def fetch() -> list[dict]:
+        raw = espn_client.fetch_roster_raw(sport, team_id)
+        return espn_client.parse_roster(raw)
+
+    try:
+        players = cache.get_or_fetch(key, ROSTER_TTL_SECONDS, fetch)
+    except espn_client.EspnApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"sport": sport, "team_id": team_id, "players": players}
+
+
+@app.get("/api/team/{sport}/{team_id}/stats")
+def get_team_stats(sport: str, team_id: str) -> dict:
+    if sport not in SPORTS:
+        raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
+
+    key = f"team_stats:{sport}:{team_id}"
+
+    def fetch() -> list[dict]:
+        raw = espn_client.fetch_team_stats_raw(sport, team_id)
+        return espn_client.parse_team_stats(raw)
+
+    try:
+        categories = cache.get_or_fetch(key, TEAM_STATS_TTL_SECONDS, fetch)
+    except espn_client.EspnApiError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"sport": sport, "team_id": team_id, "categories": categories}
 
 
 @app.get("/api/rankings/{sport}")

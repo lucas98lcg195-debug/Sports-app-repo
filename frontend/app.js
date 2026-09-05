@@ -505,58 +505,266 @@ function buildScoringPlaysList(plays) {
 }
 
 // ---------------------------------------------------------------------------
-// Team schedule page
+// Team (school) page: a sport toggle plus Schedule / Stats / Roster
+//
+// The URL only ever names one sport and one team id (wherever the link
+// came from). The other sport's team id isn't something we can assume,
+// ESPN doesn't guarantee the same school shares one id across sports,
+// so switching sport tabs resolves the sibling team by matching this
+// school's name against that sport's full team list rather than
+// guessing. If no match is found, that sport just isn't offered.
 // ---------------------------------------------------------------------------
+
+const teamPageState = {
+  sport: null,
+  teamName: null,
+  section: "schedule",
+  bySport: {
+    football: { teamId: null, resolved: false, name: null, schedule: null, stats: null, roster: null },
+    baseball: { teamId: null, resolved: false, name: null, schedule: null, stats: null, roster: null },
+  },
+};
 
 async function initTeamPage() {
   const params = new URLSearchParams(window.location.search);
   const sport = params.get("sport");
   const teamId = params.get("teamId");
-  const content = document.getElementById("team-content");
+  const content = document.getElementById("team-content-area");
 
-  if (!sport || !teamId) {
+  if (!sport || !teamId || !teamPageState.bySport[sport]) {
     content.innerHTML = "";
     content.appendChild(el("p", "error", "Missing team reference."));
     return;
   }
+
   await loadFavorites();
-  loadTeamSchedule(sport, teamId);
+
+  teamPageState.sport = sport;
+  teamPageState.bySport[sport].teamId = teamId;
+  teamPageState.bySport[sport].resolved = true;
+
+  for (const s of SPORTS) {
+    document.getElementById(`team-sport-${s}`).addEventListener("click", () => switchTeamSport(s));
+  }
+  for (const section of ["schedule", "stats", "roster"]) {
+    document.getElementById(`team-section-${section}`).addEventListener("click", () => switchTeamSection(section));
+  }
+
+  updateTeamSportTabs();
+  await ensureScheduleLoaded(sport);
+  teamPageState.teamName = teamPageState.bySport[sport].name;
+  renderTeamHeading();
+  await renderTeamSection();
 }
 
-async function loadTeamSchedule(sport, teamId) {
-  const content = document.getElementById("team-content");
+async function switchTeamSport(sport) {
+  teamPageState.sport = sport;
+  updateTeamSportTabs();
+
+  const entry = teamPageState.bySport[sport];
+  const content = document.getElementById("team-content-area");
+  if (!entry.resolved) {
+    content.innerHTML = "";
+    content.appendChild(el("p", "loading", "Loading..."));
+    await resolveSiblingTeam(sport);
+  }
+
+  renderTeamHeading();
+  await renderTeamSection();
+}
+
+async function resolveSiblingTeam(sport) {
+  const entry = teamPageState.bySport[sport];
   try {
-    const res = await fetch(`/api/team/${sport}/${teamId}/schedule`);
+    const res = await fetch(`/api/teams/${sport}`);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
-    renderTeamSchedule(content, data, sport);
+    const teams = data.teams || [];
+    const targetName = (teamPageState.teamName || "").toLowerCase();
+
+    let match = teams.find((t) => t.name.toLowerCase() === targetName);
+    if (!match && targetName) {
+      const firstWord = targetName.split(" ")[0];
+      match = teams.find((t) => t.name.toLowerCase().startsWith(firstWord));
+    }
+
+    entry.teamId = match ? match.id : null;
+    entry.name = match ? match.name : null;
   } catch (err) {
-    content.innerHTML = "";
-    content.appendChild(el("p", "error", "Could not load this team's schedule."));
-    console.error(err);
+    console.warn(`Could not resolve this school's ${sport} team`, err);
+    entry.teamId = null;
+  }
+  entry.resolved = true;
+}
+
+function switchTeamSection(section) {
+  teamPageState.section = section;
+  updateTeamSectionTabs();
+  renderTeamSection();
+}
+
+function updateTeamSportTabs() {
+  for (const s of SPORTS) {
+    document.getElementById(`team-sport-${s}`).classList.toggle("active", teamPageState.sport === s);
   }
 }
 
-function renderTeamSchedule(content, data, sport) {
-  content.innerHTML = "";
+function updateTeamSectionTabs() {
+  for (const section of ["schedule", "stats", "roster"]) {
+    document.getElementById(`team-section-${section}`).classList.toggle("active", teamPageState.section === section);
+  }
+}
 
-  const heading = el("div", "team-page-heading");
-  heading.appendChild(el("h1", null, data.team_name || "Team Schedule"));
-  heading.appendChild(
-    buildFavoriteStar(sport, { id: data.team_id, name: data.team_name, logo: null })
-  );
-  content.appendChild(heading);
+function renderTeamHeading() {
+  const heading = document.getElementById("team-heading");
+  const starContainer = document.getElementById("team-star-container");
+  heading.textContent = teamPageState.teamName || "Team";
 
-  if (!data.games || data.games.length === 0) {
-    content.appendChild(el("p", "empty", "No schedule available."));
+  starContainer.innerHTML = "";
+  const entry = teamPageState.bySport[teamPageState.sport];
+  if (entry.teamId) {
+    starContainer.appendChild(
+      buildFavoriteStar(teamPageState.sport, { id: entry.teamId, name: teamPageState.teamName, logo: null })
+    );
+  }
+}
+
+async function renderTeamSection() {
+  const content = document.getElementById("team-content-area");
+  const sport = teamPageState.sport;
+  const entry = teamPageState.bySport[sport];
+
+  if (!entry.teamId) {
+    content.innerHTML = "";
+    content.appendChild(el("p", "empty", `No ${sport} program found for this school.`));
     return;
   }
 
+  content.innerHTML = "";
+  content.appendChild(el("p", "loading", "Loading..."));
+
+  if (teamPageState.section === "schedule") {
+    await ensureScheduleLoaded(sport);
+    renderScheduleSection(content, entry, sport);
+  } else if (teamPageState.section === "stats") {
+    await ensureStatsLoaded(sport);
+    renderStatsSection(content, entry);
+  } else if (teamPageState.section === "roster") {
+    await ensureRosterLoaded(sport);
+    renderRosterSection(content, entry);
+  }
+}
+
+async function ensureScheduleLoaded(sport) {
+  const entry = teamPageState.bySport[sport];
+  if (entry.schedule || !entry.teamId) return;
+  try {
+    const res = await fetch(`/api/team/${sport}/${entry.teamId}/schedule`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    entry.schedule = data.games || [];
+    entry.name = data.team_name || entry.name;
+    if (!teamPageState.teamName) teamPageState.teamName = entry.name;
+  } catch (err) {
+    entry.schedule = [];
+    console.warn(`Could not load ${sport} schedule`, err);
+  }
+}
+
+async function ensureStatsLoaded(sport) {
+  const entry = teamPageState.bySport[sport];
+  if (entry.stats || !entry.teamId) return;
+  try {
+    const res = await fetch(`/api/team/${sport}/${entry.teamId}/stats`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    entry.stats = data.categories || [];
+  } catch (err) {
+    entry.stats = [];
+    console.warn(`Could not load ${sport} team stats`, err);
+  }
+}
+
+async function ensureRosterLoaded(sport) {
+  const entry = teamPageState.bySport[sport];
+  if (entry.roster || !entry.teamId) return;
+  try {
+    const res = await fetch(`/api/team/${sport}/${entry.teamId}/roster`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    entry.roster = data.players || [];
+  } catch (err) {
+    entry.roster = [];
+    console.warn(`Could not load ${sport} roster`, err);
+  }
+}
+
+function renderScheduleSection(content, entry, sport) {
+  content.innerHTML = "";
+  const games = entry.schedule || [];
+  if (games.length === 0) {
+    content.appendChild(el("p", "empty", "No schedule available."));
+    return;
+  }
   const list = el("div", "schedule-list");
-  for (const game of data.games) {
+  for (const game of games) {
     list.appendChild(buildScheduleRow(game, sport));
   }
   content.appendChild(list);
+}
+
+function renderStatsSection(content, entry) {
+  content.innerHTML = "";
+  const categories = entry.stats || [];
+  if (categories.length === 0) {
+    content.appendChild(el("p", "empty", "No team stats available right now."));
+    return;
+  }
+  for (const category of categories) {
+    const wrapper = el("div", "team-stats");
+    wrapper.appendChild(el("h2", null, category.category));
+    const table = document.createElement("table");
+    for (const stat of category.stats) {
+      const row = document.createElement("tr");
+      row.appendChild(el("td", null, stat.label));
+      row.appendChild(el("td", null, stat.value ?? ""));
+      table.appendChild(row);
+    }
+    wrapper.appendChild(table);
+    content.appendChild(wrapper);
+  }
+}
+
+function renderRosterSection(content, entry) {
+  content.innerHTML = "";
+  const players = entry.roster || [];
+  if (players.length === 0) {
+    content.appendChild(el("p", "empty", "No roster available right now."));
+    return;
+  }
+  const list = el("div", "roster-list");
+  for (const player of players) {
+    list.appendChild(buildRosterRow(player));
+  }
+  content.appendChild(list);
+}
+
+function buildRosterRow(player) {
+  const row = el("div", "roster-row");
+
+  const photo = el("img", "roster-photo");
+  photo.src = player.headshot || "icons/team-placeholder.png";
+  photo.alt = player.name;
+  photo.loading = "lazy";
+  row.appendChild(photo);
+
+  const body = el("div", "roster-body");
+  body.appendChild(el("div", "roster-name", player.name));
+  const metaParts = [player.position, player.jersey ? `#${player.jersey}` : null, player.class].filter(Boolean);
+  body.appendChild(el("div", "roster-meta", metaParts.join(" · ")));
+  row.appendChild(body);
+
+  return row;
 }
 
 function buildScheduleRow(game, sport) {

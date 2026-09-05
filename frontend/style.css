@@ -421,6 +421,11 @@ main {
 .sub-tabs {
   display: flex;
   gap: 4px;
+  margin-bottom: 12px;
+}
+
+.sub-tabs.section-tabs {
+  margin-top: -4px;
 }
 
 .sub-tab {
@@ -594,4 +599,42 @@ main {
   border-radius: 10px;
   padding: 0 16px;
   font-weight: 700;
+}
+
+.roster-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.roster-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.roster-photo {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 8px;
+  background: var(--bg);
+}
+
+.roster-body {
+  min-width: 0;
+}
+
+.roster-name {
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.roster-meta {
+  font-size: 0.75rem;
+  color: var(--text-dim);
 }
