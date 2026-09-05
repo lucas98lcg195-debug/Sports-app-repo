@@ -163,21 +163,157 @@ def parse_summary(raw: dict, sport: str, game_id: str) -> dict:
         competitions = header.get("competitions") or [{}]
         competition = competitions[0]
         status_type = competition.get("status", {}).get("type", {})
+        status_state = status_type.get("state", "pre")
 
         teams = [_parse_summary_team(c) for c in competition.get("competitors", [])]
 
         return {
             "id": str(game_id),
             "sport": sport,
-            "status_state": status_type.get("state", "pre"),
+            "status_state": status_state,
             "status_detail": status_type.get("shortDetail") or status_type.get("detail", ""),
             "broadcast": _parse_broadcast(competition),
+            "venue": _parse_venue(raw, competition),
+            # Only meaningful while a game is actually in progress.
+            "situation": _parse_situation(competition, sport) if status_state == "in" else None,
             "teams": teams,
             "team_stats": _parse_team_stats(raw),
             "scoring_plays": _parse_scoring_plays(raw),
+            "player_stats": _parse_player_box_scores(raw),
+            "win_probability": _parse_win_probability(raw),
         }
     except (KeyError, IndexError, TypeError) as exc:
         raise EspnApiError(f"Failed to parse box score for game {game_id}: {exc}") from exc
+
+
+def _parse_venue(raw: dict, competition: dict) -> dict:
+    game_info = raw.get("gameInfo") or {}
+    venue = game_info.get("venue") or competition.get("venue") or {}
+    address = venue.get("address") or {}
+    return {
+        "name": venue.get("fullName"),
+        "city": address.get("city"),
+        "state": address.get("state"),
+        "attendance": game_info.get("attendance"),
+    }
+
+
+_ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
+
+
+def _parse_situation(competition: dict, sport: str) -> dict | None:
+    """The live "down and distance" (football) or "outs and runners"
+    (baseball) strip. Field names here are a best-effort guess at
+    ESPN's live in-game situation shape, unconfirmed against a real
+    live game the way the stats endpoints eventually were, so this
+    returns None on anything unexpected rather than guessing wrong."""
+    situation = competition.get("situation")
+    if not situation:
+        return None
+
+    try:
+        if sport == "football":
+            text = situation.get("downDistanceText") or situation.get("shortDownDistanceText")
+            if not text:
+                down = situation.get("down")
+                distance = situation.get("distance")
+                if down and distance is not None:
+                    text = f"{_ORDINALS.get(down, f'{down}th')} & {distance}"
+            if not text:
+                return None
+            possession = situation.get("possession")
+            return {
+                "text": text,
+                "possession_team_id": str(possession) if possession else None,
+                "is_red_zone": situation.get("isRedZone"),
+            }
+
+        # Baseball
+        parts = []
+        balls, strikes = situation.get("balls"), situation.get("strikes")
+        if balls is not None and strikes is not None:
+            parts.append(f"{balls}-{strikes}")
+        outs = situation.get("outs")
+        if outs is not None:
+            parts.append(f"{outs} out" + ("" if outs == 1 else "s"))
+        bases = [
+            name
+            for name, key in (("1st", "onFirst"), ("2nd", "onSecond"), ("3rd", "onThird"))
+            if situation.get(key)
+        ]
+        if bases:
+            parts.append("on " + "/".join(bases))
+        if not parts:
+            return None
+        return {"text": ", ".join(parts), "possession_team_id": None, "is_red_zone": None}
+    except (KeyError, TypeError) as exc:
+        logger.warning("Skipping malformed situation data: %s", exc)
+        return None
+
+
+def _parse_player_box_scores(raw: dict) -> list[dict]:
+    """Per-game player stat lines, as opposed to the season totals
+    parse_player_stats returns. Unconfirmed against a real payload, so
+    this returns an empty list on any shape it doesn't recognize
+    rather than guessing at one."""
+    result = []
+    for team_entry in (raw.get("boxscore") or {}).get("players") or []:
+        try:
+            team_info = team_entry.get("team", {})
+            groups = []
+            for stat_group in team_entry.get("statistics") or []:
+                labels = stat_group.get("labels") or stat_group.get("names") or []
+                athletes = []
+                for athlete_entry in stat_group.get("athletes") or []:
+                    athlete_info = athlete_entry.get("athlete", {})
+                    values = athlete_entry.get("stats") or []
+                    stats = [
+                        {"label": label, "value": value}
+                        for label, value in zip(labels, values)
+                        if value not in (None, "")
+                    ]
+                    if stats:
+                        athletes.append(
+                            {
+                                "id": str(athlete_info.get("id", "")),
+                                "name": athlete_info.get("displayName") or athlete_info.get("shortName", "Unknown"),
+                                "stats": stats,
+                            }
+                        )
+                if athletes:
+                    groups.append(
+                        {
+                            "category": stat_group.get("displayName") or stat_group.get("name", "Stats"),
+                            "athletes": athletes,
+                        }
+                    )
+            if groups:
+                result.append(
+                    {
+                        "team_id": str(team_info.get("id", "")),
+                        "team_name": team_info.get("displayName", "Unknown"),
+                        "groups": groups,
+                    }
+                )
+        except (KeyError, TypeError) as exc:
+            logger.warning("Skipping malformed player box score entry: %s", exc)
+
+    return result
+
+
+def _parse_win_probability(raw: dict) -> list[float]:
+    """The home team's win probability at each recorded point in the
+    game, 0-100. Unconfirmed against a real payload."""
+    points = []
+    for entry in raw.get("winprobability") or []:
+        pct = entry.get("homeWinPercentage")
+        if pct is None:
+            continue
+        try:
+            points.append(round(float(pct) * 100, 1))
+        except (TypeError, ValueError):
+            continue
+    return points
 
 
 def _parse_summary_team(competitor: dict) -> dict:
@@ -189,6 +325,16 @@ def _parse_summary_team(competitor: dict) -> dict:
 
     linescores = [ls.get("displayValue") for ls in competitor.get("linescores", [])]
 
+    records = competitor.get("records") or []
+    record = records[0].get("summary") if records else None
+
+    rank = (competitor.get("curatedRank") or {}).get("current")
+    if rank is not None and (not isinstance(rank, int) or rank > 25):
+        # ESPN uses a sentinel (99 in every case seen so far) for "not
+        # ranked", not just an absent field, and a non-int here would
+        # only mean a shape we don't recognize either way.
+        rank = None
+
     return {
         "id": str(team_info.get("id", "")),
         "name": team_info.get("displayName", "Unknown"),
@@ -197,6 +343,8 @@ def _parse_summary_team(competitor: dict) -> dict:
         "score": competitor.get("score"),
         "home_away": competitor.get("homeAway", ""),
         "winner": competitor.get("winner"),
+        "record": record,
+        "rank": rank,
         "linescores": linescores,
     }
 
