@@ -730,7 +730,7 @@ async function renderGame(content, data, sport) {
   }
 
   if (data.player_stats && data.player_stats.length > 0) {
-    content.appendChild(buildPlayerBoxScores(data.player_stats, sport));
+    content.appendChild(buildPlayerBoxScores(data.player_stats, sport, data.teams));
   }
 
   if (data.scoring_plays && data.scoring_plays.length > 0) {
@@ -821,12 +821,26 @@ function buildWinProbabilityChart(points, homeTeam, awayTeam) {
   return wrapper;
 }
 
-function buildPlayerBoxScores(playerStats, sport) {
-  const wrapper = el("div", "player-box-scores info-card");
-  wrapper.appendChild(el("h2", null, "Player Stats"));
+function buildPlayerBoxScores(playerStats, sport, teams) {
+  // Each team gets its own card, rather than both sharing one, so a
+  // long box score (kicking, kick returns, defense, ...) doesn't read
+  // as one indistinct wall split only by an internal divider.
+  const wrapper = el("div", "player-box-scores");
+  wrapper.appendChild(el("h2", "section-label", "Player Stats"));
 
   for (const teamEntry of playerStats) {
-    const teamBlock = el("div", "box-score-team");
+    const teamBlock = el("div", "box-score-team info-card");
+
+    // Purely decorative: a team's own primary color (when ESPN
+    // supplies one) washes the top of its card and tints its accent
+    // border, via a CSS variable rather than a generated class, so a
+    // color that isn't there yet just falls back to the plain card
+    // look already used everywhere else.
+    const matchingTeam = (teams || []).find((t) => t.id === teamEntry.team_id);
+    if (matchingTeam && matchingTeam.color) {
+      teamBlock.style.setProperty("--team-color", matchingTeam.color);
+    }
+
     teamBlock.appendChild(el("h3", null, teamEntry.team_name));
 
     for (const group of teamEntry.groups) {

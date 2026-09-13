@@ -8,6 +8,7 @@ request.
 """
 
 import logging
+import re
 
 import requests
 
@@ -351,6 +352,20 @@ def _parse_win_probability(raw: dict) -> list[float]:
     return points
 
 
+def _parse_team_color(team_info: dict) -> str | None:
+    """A team's primary brand color, purely decorative (the gamecast
+    page's player-stats cards). ESPN sends it as a bare hex string
+    with no "#" (e.g. "203731"), when it sends it at all, unconfirmed
+    against a real payload the same as several other cosmetic fields
+    here, so anything that isn't exactly six hex digits degrades to
+    None rather than risking an invalid CSS color making it to the
+    page."""
+    color = team_info.get("color")
+    if not isinstance(color, str) or not re.fullmatch(r"[0-9a-fA-F]{6}", color):
+        return None
+    return f"#{color}"
+
+
 def _parse_summary_team(competitor: dict) -> dict:
     team_info = competitor.get("team", {})
     logo = team_info.get("logo")
@@ -368,6 +383,7 @@ def _parse_summary_team(competitor: dict) -> dict:
         "name": team_info.get("displayName", "Unknown"),
         "abbreviation": team_info.get("abbreviation", ""),
         "logo": logo,
+        "color": _parse_team_color(team_info),
         "score": competitor.get("score"),
         "home_away": competitor.get("homeAway", ""),
         "winner": competitor.get("winner"),
