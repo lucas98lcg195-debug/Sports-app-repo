@@ -10,6 +10,7 @@ an error page.
 
 import json
 import logging
+import os
 import sqlite3
 import time
 from contextlib import contextmanager
@@ -18,7 +19,14 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
-DB_PATH = Path(__file__).parent / "cache.db"
+# DATA_DIR points at a Render persistent disk in production (set as an
+# environment variable there, e.g. /var/data), so the database survives
+# deploys instead of resetting every time on the service's otherwise
+# ephemeral filesystem. Defaults to right next to the code for local
+# development, where there's no mounted disk and none is needed.
+DATA_DIR = Path(os.environ.get("DATA_DIR", Path(__file__).parent))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DATA_DIR / "cache.db"
 
 
 @contextmanager
