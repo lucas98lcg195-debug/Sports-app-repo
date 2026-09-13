@@ -778,6 +778,17 @@ function buildWinProbabilityChart(points, homeTeam, awayTeam) {
   const wrapper = el("div", "win-prob info-card");
   wrapper.appendChild(el("h2", null, "Win Probability"));
 
+  // Points track the HOME team's win probability at each snapshot, so
+  // whichever side is currently favored (the latest point, not
+  // history as a whole, the chart should reflect "right now") decides
+  // both the line's color and which label gets the bold treatment.
+  // Ties keep the plain accent color rather than guessing a side.
+  const latest = points[points.length - 1];
+  const favoredTeam = latest > 50 ? homeTeam : latest < 50 ? awayTeam : null;
+  if (favoredTeam && favoredTeam.color) {
+    wrapper.style.setProperty("--team-color", favoredTeam.color);
+  }
+
   const width = 300;
   const height = 70;
   const stepX = width / (points.length - 1);
@@ -812,10 +823,13 @@ function buildWinProbabilityChart(points, homeTeam, awayTeam) {
 
   wrapper.appendChild(svg);
 
-  const latest = points[points.length - 1];
   const labels = el("div", "win-prob-labels");
-  labels.appendChild(el("span", null, `${awayTeam.abbreviation || awayTeam.name}: ${Math.round(100 - latest)}%`));
-  labels.appendChild(el("span", null, `${homeTeam.abbreviation || homeTeam.name}: ${Math.round(latest)}%`));
+  const awayLabel = el("span", null, `${awayTeam.abbreviation || awayTeam.name}: ${Math.round(100 - latest)}%`);
+  const homeLabel = el("span", null, `${homeTeam.abbreviation || homeTeam.name}: ${Math.round(latest)}%`);
+  if (favoredTeam === awayTeam) awayLabel.classList.add("favored");
+  if (favoredTeam === homeTeam) homeLabel.classList.add("favored");
+  labels.appendChild(awayLabel);
+  labels.appendChild(homeLabel);
   wrapper.appendChild(labels);
 
   return wrapper;

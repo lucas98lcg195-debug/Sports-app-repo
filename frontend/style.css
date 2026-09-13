@@ -553,15 +553,20 @@ body.compact-view .watch-link {
   stroke-dasharray: 4 4;
 }
 
+/* Colored by whichever team is currently favored (--team-color, set
+   inline in JS from that team's own primary color), falling back to
+   the plain accent color when there's no clear favorite or that team
+   has no color available, same fallback pattern as the player-stats
+   cards' team tint. */
 .win-prob-area {
-  fill: var(--accent);
+  fill: var(--team-color, var(--accent));
   opacity: 0.12;
   stroke: none;
 }
 
 .win-prob-line {
   fill: none;
-  stroke: var(--accent);
+  stroke: var(--team-color, var(--accent));
   stroke-width: 2;
 }
 
@@ -571,6 +576,11 @@ body.compact-view .watch-link {
   font-size: 0.8rem;
   color: var(--text-dim);
   margin-top: 8px;
+}
+
+.win-prob-labels .favored {
+  color: var(--team-color, var(--text));
+  font-weight: 700;
 }
 
 /* Each team's own card, tinted with that team's primary color when
