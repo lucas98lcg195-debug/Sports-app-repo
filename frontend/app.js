@@ -453,21 +453,37 @@ async function loadScoreboards() {
 // same rankings endpoint the Rankings tab already uses. Not offered
 // for the NFL at all (see index.html, its dropdown has no Top 25
 // option), there's no AP-style poll to filter against there.
+//
+// Keyed by team_id -> rank number rather than a plain Set, so the
+// same cached fetch also backs the gamecast page's rank badge (see
+// buildGameTeamBlock): the scoreboard and game-summary endpoints each
+// try to read a rank straight off ESPN's own payload for that game,
+// but ESPN doesn't reliably include it on every shape, this is the
+// same confirmed-accurate rankings data as the Rankings tab, used as
+// a fallback whenever a game's own data came back unranked.
 const TOP25_FILTER_VALUE = "__top25__";
-const rankedTeamIds = { football: null, nfl: null, baseball: null };
+const rankedTeamsBySport = { football: null, nfl: null, baseball: null };
 
-async function ensureRankedTeamIds(sport) {
-  if (rankedTeamIds[sport]) return rankedTeamIds[sport];
+async function ensureRankedTeams(sport) {
+  if (rankedTeamsBySport[sport]) return rankedTeamsBySport[sport];
   try {
     const res = await fetch(`/api/rankings/${sport}`);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
-    rankedTeamIds[sport] = new Set((data.ranks || []).map((r) => r.team_id));
+    rankedTeamsBySport[sport] = new Map((data.ranks || []).map((r) => [r.team_id, r.rank]));
   } catch (err) {
-    console.warn(`Could not load ${sport} rankings for the Top 25 filter`, err);
-    rankedTeamIds[sport] = new Set();
+    console.warn(`Could not load ${sport} rankings`, err);
+    rankedTeamsBySport[sport] = new Map();
   }
-  return rankedTeamIds[sport];
+  return rankedTeamsBySport[sport];
+}
+
+// Only football and baseball have an AP-style Top 25 to fall back to,
+// same scope as the Top 25 scoreboard filter above; NFL "rank" data
+// is playoff seeding, not a poll rank, and was never shown as this
+// badge on the scoreboard either.
+function rankFallbackSupported(sport) {
+  return sport === "football" || sport === "baseball";
 }
 
 async function loadSportScoreboard(sport) {
@@ -486,7 +502,7 @@ async function loadSportScoreboard(sport) {
     let games = data.games || [];
 
     if (isTop25Filter) {
-      const ranked = await ensureRankedTeamIds(sport);
+      const ranked = await ensureRankedTeams(sport);
       games = games.filter((game) => game.teams.some((t) => ranked.has(t.id)));
     }
 
@@ -652,7 +668,7 @@ async function loadGame(sport, gameId) {
     const res = await fetch(`/api/game/${sport}/${gameId}`);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
-    renderGame(content, data, sport);
+    await renderGame(content, data, sport);
     return data.status_state !== "post";
   } catch (err) {
     content.innerHTML = "";
@@ -662,12 +678,19 @@ async function loadGame(sport, gameId) {
   }
 }
 
-function renderGame(content, data, sport) {
+async function renderGame(content, data, sport) {
   content.innerHTML = "";
+
+  // ESPN's own game-summary payload doesn't reliably carry a team's
+  // current rank the way its scoreboard payload does, so a team.rank
+  // that came back empty here falls back to the same Top 25 rankings
+  // data the scoreboard's badge and filter already rely on, rather
+  // than the header silently showing no rank at all for a ranked team.
+  const rankedTeams = rankFallbackSupported(sport) ? await ensureRankedTeams(sport) : null;
 
   const header = el("div", "game-header");
   for (const team of data.teams) {
-    header.appendChild(buildGameTeamBlock(team, sport));
+    header.appendChild(buildGameTeamBlock(team, sport, rankedTeams));
   }
   content.appendChild(header);
 
@@ -716,7 +739,7 @@ function formatVenue(venue) {
   return parts.filter(Boolean).join(" · ");
 }
 
-function buildGameTeamBlock(team, sport) {
+function buildGameTeamBlock(team, sport, rankedTeams) {
   const block = el("div", "team-block");
 
   const link = el("a", "team-logo-link");
@@ -725,10 +748,19 @@ function buildGameTeamBlock(team, sport) {
   logo.src = team.logo || "icons/team-placeholder.png";
   logo.alt = team.name;
   link.appendChild(logo);
+
+  // Same badge, overlaid on the logo the same way, as the scoreboard's
+  // team-block (see buildTeamBlock) — this game's own rank if it has
+  // one, else whatever the Top 25 rankings fallback knows, else
+  // nothing at all for an unranked team.
+  const rank = team.rank || (rankedTeams ? rankedTeams.get(team.id) : undefined);
+  if (rank) {
+    link.appendChild(el("span", "team-rank-badge", String(rank)));
+  }
+
   block.appendChild(link);
 
-  const nameText = team.rank ? `#${team.rank} ${team.name}` : team.name;
-  block.appendChild(el("div", "team-name", nameText));
+  block.appendChild(el("div", "team-name", team.name));
   if (team.record) block.appendChild(el("div", "team-record", team.record));
   block.appendChild(buildFavoriteStar(sport, team));
   block.appendChild(el("div", "team-score large", team.score ?? ""));
@@ -2052,6 +2084,7 @@ async function getAndResyncPushSubscription() {
 async function initPushToggle() {
   const btn = document.getElementById("push-toggle-btn");
   const status = document.getElementById("push-status");
+  const typesContainer = document.getElementById("notification-types");
 
   if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
     btn.textContent = "Not supported";
@@ -2078,9 +2111,12 @@ async function initPushToggle() {
     return;
   }
 
+  initNotificationTypeControls();
+
   const registration = await navigator.serviceWorker.ready;
   let subscription = await getAndResyncPushSubscription();
-  updatePushButton(btn, status, subscription);
+  updatePushButton(btn, status, typesContainer, subscription);
+  if (subscription) loadNotificationTypes();
 
   btn.addEventListener("click", async () => {
     btn.disabled = true;
@@ -2109,16 +2145,84 @@ async function initPushToggle() {
       console.error(err);
     }
     btn.disabled = false;
-    updatePushButton(btn, status, subscription);
+    updatePushButton(btn, status, typesContainer, subscription);
+    if (subscription) loadNotificationTypes();
   });
 }
 
-function updatePushButton(btn, status, subscription) {
+function updatePushButton(btn, status, typesContainer, subscription) {
   if (subscription) {
-    btn.textContent = "Disable close-game alerts";
+    btn.textContent = "Disable game alerts";
     status.textContent = "On for this device.";
+    typesContainer.hidden = false;
   } else {
-    btn.textContent = "Enable close-game alerts";
+    btn.textContent = "Enable game alerts";
     status.textContent = "Off for this device.";
+    typesContainer.hidden = true;
   }
+}
+
+// Notification types (close games / favorites / more to come) are
+// each their own checkbox, keyed by a data-notify-type attribute so
+// adding another type later is just another checkbox with that
+// attribute set, no JS changes needed here. "All" is a pure UI
+// convenience, checking or unchecking every real checkbox at once,
+// it isn't a type of its own and nothing stores its state directly.
+function getNotificationTypeCheckboxes() {
+  return Array.from(document.querySelectorAll("#notification-types input[data-notify-type]"));
+}
+
+function checkedNotificationTypes() {
+  return getNotificationTypeCheckboxes()
+    .filter((cb) => cb.checked)
+    .map((cb) => cb.dataset.notifyType);
+}
+
+function syncAllNotificationTypeCheckbox() {
+  const boxes = getNotificationTypeCheckboxes();
+  const allBox = document.getElementById("notify-type-all");
+  allBox.checked = boxes.length > 0 && boxes.every((cb) => cb.checked);
+}
+
+async function loadNotificationTypes() {
+  try {
+    const res = await fetch(`/api/push/notification-types?device_id=${encodeURIComponent(DEVICE_ID)}`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    const enabled = new Set(data.types || []);
+    getNotificationTypeCheckboxes().forEach((cb) => {
+      cb.checked = enabled.has(cb.dataset.notifyType);
+    });
+    syncAllNotificationTypeCheckbox();
+  } catch (err) {
+    console.warn("Could not load notification type preferences", err);
+  }
+}
+
+async function saveNotificationTypes() {
+  try {
+    await fetch("/api/push/notification-types", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: DEVICE_ID, types: checkedNotificationTypes() }),
+    });
+  } catch (err) {
+    console.warn("Could not save notification type preferences", err);
+  }
+}
+
+function initNotificationTypeControls() {
+  getNotificationTypeCheckboxes().forEach((cb) => {
+    cb.addEventListener("change", () => {
+      syncAllNotificationTypeCheckbox();
+      saveNotificationTypes();
+    });
+  });
+
+  document.getElementById("notify-type-all").addEventListener("change", (event) => {
+    getNotificationTypeCheckboxes().forEach((cb) => {
+      cb.checked = event.target.checked;
+    });
+    saveNotificationTypes();
+  });
 }

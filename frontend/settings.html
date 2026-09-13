@@ -45,12 +45,15 @@
     <section class="settings-section">
       <h2>Game alerts</h2>
       <p class="settings-help">
-        Get a quiet notification any time a football game, nationally, is within a touchdown with five minutes or
-        less left in the 4th quarter, plus a kickoff alert, a final score alert, and an alert on every score change
-        while it's happening for any Auburn or Mississippi State game.
+        Get a quiet notification for close games, your favorited teams, or both, picked below.
       </p>
       <button id="push-toggle-btn" type="button">Loading...</button>
       <p id="push-status" class="settings-help"></p>
+      <div id="notification-types" class="notification-types" hidden>
+        <label><input type="checkbox" id="notify-type-all"> All</label>
+        <label><input type="checkbox" data-notify-type="close"> Close games — any football game, nationally, within a touchdown with five minutes or less left in the 4th quarter</label>
+        <label><input type="checkbox" data-notify-type="favorites"> My favorited teams — a kickoff, final score, and every score change while they play</label>
+      </div>
     </section>
   </main>
   <script src="app.js"></script>
