@@ -37,6 +37,7 @@
     <a href="standings.html">Standings</a>
     <a href="news.html">News</a>
   </nav>
+  <div id="league-tabs-slot"></div>
   <main>
     <section class="sport-section" id="my-teams-section" hidden>
       <div class="section-header">
@@ -44,10 +45,10 @@
       </div>
       <div id="my-teams-games" class="game-list"></div>
     </section>
-    <section class="sport-section">
+    <section class="sport-section" id="football-section">
       <div class="section-header">
-        <h2>Football</h2>
-        <select id="football-conference" class="conference-select" aria-label="Football conference">
+        <h2>College Football</h2>
+        <select id="football-conference" class="conference-select" aria-label="College football conference">
           <option value="">All Conferences</option>
           <option value="__top25__">Top 25</option>
         </select>
@@ -56,10 +57,21 @@
         <p class="loading">Loading...</p>
       </div>
     </section>
-    <section class="sport-section">
+    <section class="sport-section" id="nfl-section" hidden>
       <div class="section-header">
-        <h2>Baseball</h2>
-        <select id="baseball-conference" class="conference-select" aria-label="Baseball conference">
+        <h2>NFL</h2>
+        <select id="nfl-conference" class="conference-select" aria-label="NFL conference">
+          <option value="">All Conferences</option>
+        </select>
+      </div>
+      <div id="nfl-games" class="game-list">
+        <p class="loading">Loading...</p>
+      </div>
+    </section>
+    <section class="sport-section" id="baseball-section" hidden>
+      <div class="section-header">
+        <h2>College Baseball</h2>
+        <select id="baseball-conference" class="conference-select" aria-label="College baseball conference">
           <option value="">All Conferences</option>
           <option value="__top25__">Top 25</option>
         </select>

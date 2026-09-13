@@ -131,6 +131,16 @@ main {
   margin: 0 auto;
 }
 
+/* The Scores page's League tab strip sits between .top-nav and <main>
+   rather than inside .section-header the way Rankings and Standings
+   already had room for theirs, so it needs its own horizontal padding
+   to match main's, otherwise it would run flush to the screen edges. */
+#league-tabs-slot {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8px 8px 0;
+}
+
 .sport-section {
   margin-bottom: 24px;
 }
@@ -730,6 +740,14 @@ body.compact-view .watch-link {
 
 .sub-tabs.section-tabs {
   margin-top: -4px;
+}
+
+/* .sub-tabs sets display: flex, which otherwise beats the browser's
+   own [hidden] { display: none } default (a class selector outranks
+   that unstyled attribute rule), so a hidden sub-tabs element would
+   stay visible despite JS correctly setting el.hidden = true. */
+.sub-tabs[hidden] {
+  display: none;
 }
 
 .sub-tab {
