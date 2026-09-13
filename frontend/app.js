@@ -176,8 +176,10 @@ const scoreboardState = {
 };
 
 async function initScoreboardPage() {
+  document.getElementById("prev-week").addEventListener("click", () => shiftDate(-7));
   document.getElementById("prev-day").addEventListener("click", () => shiftDate(-1));
   document.getElementById("next-day").addEventListener("click", () => shiftDate(1));
+  document.getElementById("next-week").addEventListener("click", () => shiftDate(7));
   document.getElementById("today-btn").addEventListener("click", () => setDate(new Date()));
 
   initCompactViewToggle();

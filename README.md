@@ -93,6 +93,18 @@ One honest limitation from building this: the entire backend, VAPID signing, enc
 
 The app is a single Python process with no external database, so it deploys cleanly to Render's free web service tier straight from this GitHub repository. Point Render at the `backend/` directory, set the start command to `uvicorn main:app --host 0.0.0.0 --port $PORT`, and the same process will serve the API and the installable frontend at the resulting public URL. A custom domain from a registrar such as Cloudflare can be pointed at that Render service afterward if wanted, though it is not required to use the app.
 
+## Jumping a week at a time
+
+Alongside the single-day `‹`/`›` buttons, the scoreboard's date nav has `«`/`»` buttons that move a full week at a time. Both call the same `shiftDate` function that already existed for the single-day buttons, just with `±7` instead of `±1`, no new date logic needed.
+
+## NFL, backend only so far
+
+The backend can now talk to ESPN about the NFL, not just college football and college baseball, `"nfl"` is a third registered sport (`SPORT_PATHS` in `espn_client.py`, `SPORTS` in `main.py`), and every route that was already written generically over a sport key, scoreboard, gamecast/box score, team schedule, team list, roster, team stats, and player stats, now serves NFL data as a side effect, without any NFL-specific parsing code. The NFL also gets its own conference table (`NFL_CONFERENCES` in `conferences.py`, AFC and NFC), a separate id namespace from the college conference lists, since the NFL has no NCAA-style conferences at all.
+
+Two things are explicitly not done yet, both called out in the plan this was built from. The NFL has no AP/Coaches poll, so `/api/rankings/nfl` will simply fail against ESPN once actually called (no route exists that calls it yet, since there's no frontend for the NFL at all so far), the plan for that gap is to replace Rankings with a playoff-seeding view for the NFL specifically rather than trying to force a rankings page onto data that doesn't exist. And there is no frontend for any of this: `index.html`, `rankings.html`, `standings.html`, and `news.html` still only know about football and baseball, adding an NFL tab to the UI is a separate, later piece of work.
+
+The NFL conference ids and the assumption that ESPN's `football/nfl` payloads share the same shapes as `football/college-football` are both best-effort guesses verified only against synthetic fixtures in this sandbox, not a real live NFL payload, consistent with how every other piece of ESPN schema in this app has started out.
+
 ## Scope
 
 This is a single-user personal project. There are no user accounts, no authentication, and no multi-user features, and none are planned.

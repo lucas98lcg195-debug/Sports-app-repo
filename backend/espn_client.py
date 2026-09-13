@@ -20,6 +20,7 @@ BASE_URL = "https://site.api.espn.com/apis/site/v2/sports"
 SPORT_PATHS = {
     "football": "football/college-football",
     "baseball": "baseball/college-baseball",
+    "nfl": "football/nfl",
 }
 
 REQUEST_TIMEOUT_SECONDS = 10
