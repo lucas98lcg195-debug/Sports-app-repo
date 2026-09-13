@@ -876,23 +876,6 @@ body.compact-view .watch-link {
   overflow-x: auto;
 }
 
-.standings-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.standings-table th, .standings-table td {
-  border: 1px solid var(--border);
-  padding: 6px 8px;
-  font-size: 0.8rem;
-  text-align: center;
-  white-space: nowrap;
-}
-
-.standings-team-cell {
-  text-align: left !important;
-}
-
 .standings-team-link {
   display: flex;
   align-items: center;
