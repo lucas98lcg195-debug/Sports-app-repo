@@ -7,25 +7,34 @@ signs a message with a VAPID key pair and hands it to pywebpush, which
 encrypts it and delivers it to whichever push service (Apple's,
 Google's, etc.) that subscription belongs to.
 
-Four kinds of alert, each checked independently against every game in
-a refresh batch:
+Every alert belongs to one of a small, expandable set of notification
+*types*, each independently on or off per code (see NOTIFICATION_TYPES,
+push_notification_types, get_notification_types/set_notification_types).
+Adding a new kind of alert later means adding a new entry to
+NOTIFICATION_TYPES, a checkbox for it on the settings page, and whatever
+new detection logic it needs, nothing about the storage or the
+per-recipient filtering below has to change.
 
   "close": 7 points or less with 5 minutes or less left in the 4th
-    quarter, football only, any team, nationally.
-  "start": a game involving Auburn or Mississippi State just went live.
-  "final": a game involving Auburn or Mississippi State just ended.
-  "score": the score changed in a live game involving Auburn or
-    Mississippi State.
+    quarter, football only, any team, nationally. Not scoped to
+    favorites, since the whole point is a good game nobody was
+    necessarily already following.
+  "favorites": a kickoff, a final score, or a score change in a live
+    game involving one of that code's own favorited teams, in any of
+    the three sports.
 
-Every subscribed device gets every alert that fires, there's no
-per-device favorites scoping. Close/start/final each fire at most once
-per game, tracked in notified_alerts so the same game/kind pair doesn't
-re-fire on every 30-second refresh. A score-change alert can fire more
-than once per game, once per distinct score, since the whole point is
-to hear about each change, that's handled by folding the actual score
-into the alert's kind string (see check_and_notify) rather than a
-separate table, so notified_alerts still only ever sends a given exact
-score once per game.
+Kickoff/final each fire at most once per game, tracked in
+notified_alerts so the same game/kind pair doesn't re-fire on every
+30-second refresh; likewise close-game alerts fire at most once per
+game. A score-change alert can fire more than once per game, once per
+distinct score, since the whole point is to hear about each change,
+that's handled by folding the actual score into the alert's kind
+string (see check_and_notify) rather than a separate table, so
+notified_alerts still only ever sends a given exact score once per
+game. All of that per-game state (last-seen score, which games have
+already fired which alert) is computed once per refresh batch,
+independent of who's subscribed; only the per-recipient type/favorites
+filtering below is repeated per device.
 """
 
 import json
@@ -36,6 +45,7 @@ import time
 from pywebpush import WebPushException, webpush
 
 import cache
+import favorites
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +59,14 @@ CLOSE_GAME_MARGIN = 7
 CLOSE_GAME_SECONDS_REMAINING = 5 * 60
 CLOSE_GAME_PERIOD = 4
 
-# Matched against a team's full name, lowercased, substring match, the
-# same approach news_client.py uses for its relevance filter. Neither
-# name collides with any other Division I school, so a substring match
-# is precise enough without needing team ids, which can also differ
-# between a school's football and baseball programs.
-TRACKED_TEAM_NAMES = ["auburn", "mississippi state"]
+# The full set of notification types that exist. A code with no
+# push_notification_types rows at all (never configured, including
+# every code that existed before this table did) is treated as having
+# every type enabled, preserving the old all-or-nothing behavior until
+# the person actually visits settings and changes something. "All" on
+# the settings page is just a UI convenience that checks every box
+# here, it isn't its own stored value.
+NOTIFICATION_TYPES = ["close", "favorites"]
 
 
 def is_configured() -> bool:
@@ -95,6 +107,15 @@ def init_tables() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS push_notification_types (
+                code TEXT NOT NULL,
+                type TEXT NOT NULL,
+                PRIMARY KEY (code, type)
+            )
+            """
+        )
         conn.commit()
 
 
@@ -125,6 +146,44 @@ def all_subscriptions() -> list[dict]:
     with cache.connect() as conn:
         rows = conn.execute("SELECT device_id, endpoint, p256dh, auth FROM push_subscriptions").fetchall()
     return [{"device_id": r[0], "endpoint": r[1], "p256dh": r[2], "auth": r[3]} for r in rows]
+
+
+# Stored alongside a code's enabled types whenever set_notification_types
+# runs, even if the person unchecked everything. Its presence is what
+# tells get_notification_types the difference between "never touched
+# settings" (default: everything on) and "deliberately turned every
+# type off" (which would otherwise look identical: no rows either
+# way), a real case once there's a UI to uncheck every box.
+_CONFIGURED_MARKER = "_configured"
+
+
+def get_notification_types(code: str) -> list[str]:
+    """Which alert types this code currently wants. A code that has
+    never touched this setting has no rows here at all, and gets every
+    known type back, matching what everyone got before per-type
+    settings existed."""
+    with cache.connect() as conn:
+        rows = conn.execute("SELECT type FROM push_notification_types WHERE code = ?", (code,)).fetchall()
+    types_present = {r[0] for r in rows}
+    if not types_present:
+        return list(NOTIFICATION_TYPES)
+    return [t for t in NOTIFICATION_TYPES if t in types_present]
+
+
+def set_notification_types(code: str, types: list[str]) -> list[str]:
+    """Replaces this code's enabled types wholesale with the given
+    list, dropping any duplicates or names this build doesn't
+    recognize. Returns what was actually stored. Recorded even when
+    types is empty, see _CONFIGURED_MARKER."""
+    valid = sorted({t for t in types if t in NOTIFICATION_TYPES})
+    with cache.connect() as conn:
+        conn.execute("DELETE FROM push_notification_types WHERE code = ?", (code,))
+        conn.executemany(
+            "INSERT INTO push_notification_types (code, type) VALUES (?, ?)",
+            [(code, t) for t in valid] + [(code, _CONFIGURED_MARKER)],
+        )
+        conn.commit()
+    return valid
 
 
 def _already_notified(device_id: str, game_id: str, kind: str) -> bool:
@@ -184,26 +243,27 @@ def is_close_game(game: dict) -> bool:
     return abs(scores[0] - scores[1]) <= CLOSE_GAME_MARGIN
 
 
-def _is_tracked_team(team: dict) -> bool:
-    name = (team.get("name") or "").lower()
-    return any(tracked in name for tracked in TRACKED_TEAM_NAMES)
-
-
-def is_tracked_team_game(game: dict) -> bool:
-    return any(_is_tracked_team(t) for t in game.get("teams") or [])
+def _game_team_keys(game: dict) -> set[tuple[str, str]]:
+    """The (sport, team_id) pairs playing in this game, in the same
+    shape favorites are stored in, so a recipient's favorites can be
+    intersected against it directly."""
+    sport = game.get("sport")
+    return {(sport, t["id"]) for t in game.get("teams") or [] if t.get("id")}
 
 
 def is_game_start_alert(game: dict) -> bool:
-    """Fires once a tracked team's game is live. Checked against
-    whatever status a refresh happens to see, there's no memory of the
-    previous status here, so if the server was asleep or just restarted
-    while the game was already underway, this fires late, on the first
-    refresh that catches it "in", rather than not at all."""
-    return game.get("status_state") == "in" and is_tracked_team_game(game)
+    """Fires once a game goes live. Checked against whatever status a
+    refresh happens to see, there's no memory of the previous status
+    here, so if the server was asleep or just restarted while the game
+    was already underway, this fires late, on the first refresh that
+    catches it "in", rather than not at all. Whether this is actually
+    interesting to any given recipient (a favorited team) is decided
+    later, per recipient, not here."""
+    return game.get("status_state") == "in"
 
 
 def is_final_score_alert(game: dict) -> bool:
-    return game.get("status_state") == "post" and is_tracked_team_game(game)
+    return game.get("status_state") == "post"
 
 
 def _current_scores(game: dict) -> tuple[str, str] | None:
@@ -297,10 +357,12 @@ def _send(subscription: dict, payload: str) -> bool:
 
 def check_and_notify(games_by_sport: dict[str, list[dict]]) -> None:
     """Called after each scoreboard refresh with the games that were
-    just fetched. Every subscribed device gets every alert that fires
-    out of this batch, close games nationally plus start/final/score
-    alerts for Auburn and Mississippi State specifically, each one at
-    most once per game (score alerts: once per distinct score)."""
+    just fetched. Close-game alerts (football, nationally, not scoped
+    to favorites) and favorites alerts (kickoff/final/score-change for
+    a code's own favorited teams, any sport) are each computed once for
+    the whole batch, then filtered per subscribed device by that
+    device's code: which notification types it currently wants, and
+    for the favorites type, which teams it actually has favorited."""
     if not is_configured():
         return
 
@@ -308,26 +370,29 @@ def check_and_notify(games_by_sport: dict[str, list[dict]]) -> None:
     if not all_games:
         return
 
-    alerts = []  # (kind, game, title)
+    close_alerts = []  # (kind, game, title)
+    team_alerts = []  # (kind, game, title, team_keys)
     for game in all_games:
         if is_close_game(game):
-            alerts.append(("close", game, "Close game"))
+            close_alerts.append(("close", game, "Close game"))
+
+        team_keys = _game_team_keys(game)
         if is_game_start_alert(game):
-            alerts.append(("start", game, "Game starting"))
+            team_alerts.append(("start", game, "Game starting", team_keys))
         if is_final_score_alert(game):
-            alerts.append(("final", game, "Final score"))
+            team_alerts.append(("final", game, "Final score", team_keys))
             _clear_last_score(game["id"])
 
-        if game.get("status_state") == "in" and is_tracked_team_game(game):
+        if game.get("status_state") == "in":
             current = _current_scores(game)
             if current is not None:
                 previous = _get_last_score(game["id"])
                 if previous is not None and previous != current:
                     kind = f"score:{current[0]}-{current[1]}"
-                    alerts.append((kind, game, "Score update"))
+                    team_alerts.append((kind, game, "Score update", team_keys))
                 _set_last_score(game["id"], current[0], current[1])
 
-    if not alerts:
+    if not close_alerts and not team_alerts:
         return
 
     subscriptions = all_subscriptions()
@@ -336,6 +401,19 @@ def check_and_notify(games_by_sport: dict[str, list[dict]]) -> None:
 
     for subscription in subscriptions:
         device_id = subscription["device_id"]
+        code = favorites.code_for_device(device_id)
+        enabled_types = set(get_notification_types(code))
+
+        alerts = []  # (kind, game, title)
+        if "close" in enabled_types:
+            alerts.extend(close_alerts)
+
+        if "favorites" in enabled_types and team_alerts:
+            favorite_keys = {(f["sport"], f["team_id"]) for f in favorites.list_favorites(code)}
+            if favorite_keys:
+                alerts.extend(
+                    (kind, game, title) for kind, game, title, team_keys in team_alerts if team_keys & favorite_keys
+                )
 
         for kind, game, title in alerts:
             game_id = game["id"]

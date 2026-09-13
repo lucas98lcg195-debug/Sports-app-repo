@@ -2052,6 +2052,7 @@ async function getAndResyncPushSubscription() {
 async function initPushToggle() {
   const btn = document.getElementById("push-toggle-btn");
   const status = document.getElementById("push-status");
+  const typesContainer = document.getElementById("notification-types");
 
   if (!("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window)) {
     btn.textContent = "Not supported";
@@ -2078,9 +2079,12 @@ async function initPushToggle() {
     return;
   }
 
+  initNotificationTypeControls();
+
   const registration = await navigator.serviceWorker.ready;
   let subscription = await getAndResyncPushSubscription();
-  updatePushButton(btn, status, subscription);
+  updatePushButton(btn, status, typesContainer, subscription);
+  if (subscription) loadNotificationTypes();
 
   btn.addEventListener("click", async () => {
     btn.disabled = true;
@@ -2109,16 +2113,84 @@ async function initPushToggle() {
       console.error(err);
     }
     btn.disabled = false;
-    updatePushButton(btn, status, subscription);
+    updatePushButton(btn, status, typesContainer, subscription);
+    if (subscription) loadNotificationTypes();
   });
 }
 
-function updatePushButton(btn, status, subscription) {
+function updatePushButton(btn, status, typesContainer, subscription) {
   if (subscription) {
-    btn.textContent = "Disable close-game alerts";
+    btn.textContent = "Disable game alerts";
     status.textContent = "On for this device.";
+    typesContainer.hidden = false;
   } else {
-    btn.textContent = "Enable close-game alerts";
+    btn.textContent = "Enable game alerts";
     status.textContent = "Off for this device.";
+    typesContainer.hidden = true;
   }
+}
+
+// Notification types (close games / favorites / more to come) are
+// each their own checkbox, keyed by a data-notify-type attribute so
+// adding another type later is just another checkbox with that
+// attribute set, no JS changes needed here. "All" is a pure UI
+// convenience, checking or unchecking every real checkbox at once,
+// it isn't a type of its own and nothing stores its state directly.
+function getNotificationTypeCheckboxes() {
+  return Array.from(document.querySelectorAll("#notification-types input[data-notify-type]"));
+}
+
+function checkedNotificationTypes() {
+  return getNotificationTypeCheckboxes()
+    .filter((cb) => cb.checked)
+    .map((cb) => cb.dataset.notifyType);
+}
+
+function syncAllNotificationTypeCheckbox() {
+  const boxes = getNotificationTypeCheckboxes();
+  const allBox = document.getElementById("notify-type-all");
+  allBox.checked = boxes.length > 0 && boxes.every((cb) => cb.checked);
+}
+
+async function loadNotificationTypes() {
+  try {
+    const res = await fetch(`/api/push/notification-types?device_id=${encodeURIComponent(DEVICE_ID)}`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    const enabled = new Set(data.types || []);
+    getNotificationTypeCheckboxes().forEach((cb) => {
+      cb.checked = enabled.has(cb.dataset.notifyType);
+    });
+    syncAllNotificationTypeCheckbox();
+  } catch (err) {
+    console.warn("Could not load notification type preferences", err);
+  }
+}
+
+async function saveNotificationTypes() {
+  try {
+    await fetch("/api/push/notification-types", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_id: DEVICE_ID, types: checkedNotificationTypes() }),
+    });
+  } catch (err) {
+    console.warn("Could not save notification type preferences", err);
+  }
+}
+
+function initNotificationTypeControls() {
+  getNotificationTypeCheckboxes().forEach((cb) => {
+    cb.addEventListener("change", () => {
+      syncAllNotificationTypeCheckbox();
+      saveNotificationTypes();
+    });
+  });
+
+  document.getElementById("notify-type-all").addEventListener("change", (event) => {
+    getNotificationTypeCheckboxes().forEach((cb) => {
+      cb.checked = event.target.checked;
+    });
+    saveNotificationTypes();
+  });
 }

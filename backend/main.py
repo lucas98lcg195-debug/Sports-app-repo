@@ -78,6 +78,11 @@ class PushSubscribePayload(BaseModel):
     auth: str
 
 
+class NotificationTypesPayload(BaseModel):
+    device_id: str
+    types: list[str]
+
+
 def today_str() -> str:
     return date_cls.today().strftime("%Y%m%d")
 
@@ -423,6 +428,18 @@ def subscribe_push(payload: PushSubscribePayload) -> dict:
 def unsubscribe_push(device_id: str) -> dict:
     push.remove_subscription(device_id)
     return {"status": "ok"}
+
+
+@app.get("/api/push/notification-types")
+def get_notification_types(device_id: str) -> dict:
+    code = favorites.code_for_device(device_id)
+    return {"types": push.get_notification_types(code), "available": push.NOTIFICATION_TYPES}
+
+
+@app.post("/api/push/notification-types")
+def set_notification_types(payload: NotificationTypesPayload) -> dict:
+    code = favorites.code_for_device(payload.device_id)
+    return {"types": push.set_notification_types(code, payload.types)}
 
 
 @app.get("/api/news/sources")
