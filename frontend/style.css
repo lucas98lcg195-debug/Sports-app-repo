@@ -188,6 +188,7 @@ main {
 .team-logo-link {
   display: inline-block;
   line-height: 0;
+  position: relative;
 }
 
 .team-logo {
@@ -208,6 +209,29 @@ main {
   height: 28px;
 }
 
+/* AP Top 25 rank, pinned to the logo's corner rather than placed
+   inline, so it lands in a fixed spot regardless of whether the
+   surrounding team-block is laid out in a column (default view) or a
+   row, including the reversed row compact view uses for its second
+   team, where an inline element would otherwise land on a different
+   side depending on which team it is. */
+.team-rank-badge {
+  position: absolute;
+  top: -4px;
+  left: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  z-index: 1;
+}
+
 .team-name {
   font-size: 0.8rem;
   color: var(--text-dim);
@@ -225,6 +249,11 @@ main {
 
 .team-score.large {
   font-size: 1.8rem;
+}
+
+.possession-marker {
+  font-size: 0.85rem;
+  line-height: 1;
 }
 
 .fav-star {
@@ -267,6 +296,13 @@ main {
 .status-block.live .status-detail {
   color: var(--live);
   font-weight: 700;
+}
+
+.situation-text {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  margin-top: 2px;
 }
 
 .broadcast {
@@ -335,6 +371,23 @@ body.compact-view .team-score {
   min-width: 1.2em;
 }
 
+/* Rank badge and possession marker both stay visible in compact view
+   (only the down-and-distance/count text below is regular-view only),
+   just shrunk to match the smaller logo and tighter row. */
+body.compact-view .team-rank-badge {
+  min-width: 12px;
+  height: 12px;
+  padding: 0 2px;
+  font-size: 0.5rem;
+  line-height: 12px;
+  top: -2px;
+  left: -2px;
+}
+
+body.compact-view .possession-marker {
+  font-size: 0.7rem;
+}
+
 body.compact-view .status-block {
   display: flex;
   align-items: center;
@@ -353,6 +406,7 @@ body.compact-view .status-detail {
   line-height: 1.15;
 }
 
+body.compact-view .situation-text,
 body.compact-view .broadcast,
 body.compact-view .watch-link {
   display: none;

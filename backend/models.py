@@ -19,6 +19,7 @@ class Team:
     record: Optional[str]
     home_away: str
     winner: Optional[bool]
+    rank: Optional[int] = None
 
 
 @dataclass
@@ -33,6 +34,10 @@ class Game:
     venue: Optional[str]
     broadcast: Optional[str]
     teams: list = field(default_factory=list)
+    # The live "down and distance" (football) or "count/outs/runners"
+    # (baseball) strip, plus which team has the ball for football. Only
+    # meaningful while status_state == "in", None otherwise.
+    situation: Optional[dict] = None
 
 
 def game_to_dict(game: Game) -> dict:

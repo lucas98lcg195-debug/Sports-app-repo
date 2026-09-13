@@ -96,6 +96,7 @@ def _parse_event(event: dict, sport: str) -> Game:
     competition = competitions[0]
     status = event.get("status", {})
     status_type = status.get("type", {})
+    status_state = status_type.get("state", "pre")
 
     teams = [_parse_team(competitor) for competitor in competition.get("competitors", [])]
     venue = (competition.get("venue") or {}).get("fullName")
@@ -104,13 +105,20 @@ def _parse_event(event: dict, sport: str) -> Game:
         id=str(event.get("id", "")),
         sport=sport,
         date=event.get("date", ""),
-        status_state=status_type.get("state", "pre"),
+        status_state=status_state,
         status_detail=status_type.get("shortDetail") or status_type.get("detail", ""),
         period=status.get("period"),
         clock=status.get("displayClock"),
         venue=venue,
         broadcast=_parse_broadcast(competition),
         teams=teams,
+        # Same situation shape parse_summary already uses for the
+        # gamecast page, reused here so the scoreboard list can show
+        # down-and-distance/possession too, without a second ESPN call
+        # per game. Unconfirmed against the scoreboard endpoint's own
+        # payload shape specifically (only ever seen on the summary
+        # endpoint so far), degrades to None rather than guessing wrong.
+        situation=_parse_situation(competition, sport) if status_state == "in" else None,
     )
 
 
@@ -130,6 +138,18 @@ def _parse_broadcast(competition: dict) -> str | None:
     return ", ".join(dict.fromkeys(names))
 
 
+def _parse_rank(competitor: dict) -> int | None:
+    """A team's current AP rank, or None when it isn't ranked. ESPN
+    uses a sentinel (99 in every case seen so far) for "not ranked"
+    rather than just omitting the field, and a non-int here would only
+    mean a shape this doesn't recognize either way, so both collapse
+    to None rather than showing a wrong number."""
+    rank = (competitor.get("curatedRank") or {}).get("current")
+    if rank is not None and (not isinstance(rank, int) or rank > 25):
+        rank = None
+    return rank
+
+
 def _parse_team(competitor: dict) -> Team:
     team_info = competitor.get("team", {})
     records = competitor.get("records") or []
@@ -144,6 +164,10 @@ def _parse_team(competitor: dict) -> Team:
         record=record,
         home_away=competitor.get("homeAway", ""),
         winner=competitor.get("winner"),
+        # Unconfirmed against the scoreboard endpoint's own payload
+        # shape specifically, curatedRank has only ever been seen on
+        # the summary endpoint so far. Degrades to None, not a guess.
+        rank=_parse_rank(competitor),
     )
 
 
@@ -329,13 +353,6 @@ def _parse_summary_team(competitor: dict) -> dict:
     records = competitor.get("records") or []
     record = records[0].get("summary") if records else None
 
-    rank = (competitor.get("curatedRank") or {}).get("current")
-    if rank is not None and (not isinstance(rank, int) or rank > 25):
-        # ESPN uses a sentinel (99 in every case seen so far) for "not
-        # ranked", not just an absent field, and a non-int here would
-        # only mean a shape we don't recognize either way.
-        rank = None
-
     return {
         "id": str(team_info.get("id", "")),
         "name": team_info.get("displayName", "Unknown"),
@@ -345,7 +362,7 @@ def _parse_summary_team(competitor: dict) -> dict:
         "home_away": competitor.get("homeAway", ""),
         "winner": competitor.get("winner"),
         "record": record,
-        "rank": rank,
+        "rank": _parse_rank(competitor),
         "linescores": linescores,
     }
 
