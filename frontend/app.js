@@ -688,26 +688,32 @@ async function renderGame(content, data, sport) {
   // than the header silently showing no rank at all for a ranked team.
   const rankedTeams = rankFallbackSupported(sport) ? await ensureRankedTeams(sport) : null;
 
+  // Everything about "the game right now" — the score, who has the
+  // ball, status/broadcast/venue — reads as one card, the same way a
+  // scoreboard row is one visual unit rather than several loose lines.
+  const matchupCard = el("div", "info-card matchup-card");
+
   const header = el("div", "game-header");
   for (const team of data.teams) {
     header.appendChild(buildGameTeamBlock(team, sport, rankedTeams));
   }
-  content.appendChild(header);
+  matchupCard.appendChild(header);
 
   if (data.situation && data.situation.text) {
     const strip = el("p", "situation-strip", data.situation.text);
     if (data.situation.is_red_zone) strip.classList.add("red-zone");
-    content.appendChild(strip);
+    matchupCard.appendChild(strip);
   }
 
-  content.appendChild(el("p", "status-detail", displayGameStatus(data)));
+  matchupCard.appendChild(el("p", "status-detail", displayGameStatus(data)));
   if (data.broadcast) {
-    content.appendChild(el("p", "broadcast", data.broadcast));
+    matchupCard.appendChild(el("p", "broadcast", data.broadcast));
   }
   if (data.venue && data.venue.name) {
-    content.appendChild(el("p", "venue-line", formatVenue(data.venue)));
+    matchupCard.appendChild(el("p", "venue-line", formatVenue(data.venue)));
   }
-  content.appendChild(buildWatchLink(sport, data.id));
+  matchupCard.appendChild(buildWatchLink(sport, data.id));
+  content.appendChild(matchupCard);
 
   const home = data.teams.find((t) => t.home_away === "home");
   const away = data.teams.find((t) => t.home_away === "away");
@@ -769,7 +775,7 @@ function buildGameTeamBlock(team, sport, rankedTeams) {
 }
 
 function buildWinProbabilityChart(points, homeTeam, awayTeam) {
-  const wrapper = el("div", "win-prob");
+  const wrapper = el("div", "win-prob info-card");
   wrapper.appendChild(el("h2", null, "Win Probability"));
 
   const width = 300;
@@ -791,6 +797,14 @@ function buildWinProbabilityChart(points, homeTeam, awayTeam) {
   midline.setAttribute("class", "win-prob-midline");
   svg.appendChild(midline);
 
+  // A soft fill under the line, purely decorative, closes the same
+  // points back along the bottom edge so it reads as an area rather
+  // than an odd unclosed shape.
+  const area = document.createElementNS(svgNS, "polygon");
+  area.setAttribute("points", `0,${height} ${coords.join(" ")} ${width},${height}`);
+  area.setAttribute("class", "win-prob-area");
+  svg.appendChild(area);
+
   const polyline = document.createElementNS(svgNS, "polyline");
   polyline.setAttribute("points", coords.join(" "));
   polyline.setAttribute("class", "win-prob-line");
@@ -808,7 +822,7 @@ function buildWinProbabilityChart(points, homeTeam, awayTeam) {
 }
 
 function buildPlayerBoxScores(playerStats, sport) {
-  const wrapper = el("div", "player-box-scores");
+  const wrapper = el("div", "player-box-scores info-card");
   wrapper.appendChild(el("h2", null, "Player Stats"));
 
   for (const teamEntry of playerStats) {
@@ -821,7 +835,7 @@ function buildPlayerBoxScores(playerStats, sport) {
       const groupWrapper = el("div", "box-score-group");
       groupWrapper.appendChild(el("h4", null, group.category));
 
-      const table = document.createElement("table");
+      const table = el("table", "data-table");
       const headRow = document.createElement("tr");
       headRow.appendChild(document.createElement("th"));
       for (const stat of group.athletes[0].stats) {
@@ -852,7 +866,10 @@ function buildPlayerBoxScores(playerStats, sport) {
 }
 
 function buildLineScoreTable(teams) {
-  const table = el("table", "line-score");
+  const wrapper = el("div", "line-score info-card");
+  wrapper.appendChild(el("h2", null, "Line Score"));
+
+  const table = el("table", "data-table");
   const periodCounts = teams.map((t) => (t.linescores || []).length);
   const maxPeriods = Math.max(0, ...periodCounts);
 
@@ -870,15 +887,16 @@ function buildLineScoreTable(teams) {
     for (let i = 0; i < maxPeriods; i++) {
       row.appendChild(el("td", null, (team.linescores || [])[i] ?? ""));
     }
-    row.appendChild(el("td", null, team.score ?? ""));
+    row.appendChild(el("td", "line-score-total", team.score ?? ""));
     table.appendChild(row);
   }
 
-  return table;
+  wrapper.appendChild(table);
+  return wrapper;
 }
 
 function buildTeamStatsTable(teamStats) {
-  const wrapper = el("div", "team-stats");
+  const wrapper = el("div", "team-stats info-card");
   wrapper.appendChild(el("h2", null, "Team Stats"));
 
   const statNames = new Set();
@@ -886,7 +904,7 @@ function buildTeamStatsTable(teamStats) {
     Object.keys(ts.stats || {}).forEach((name) => statNames.add(name));
   }
 
-  const table = document.createElement("table");
+  const table = el("table", "data-table");
   const headRow = document.createElement("tr");
   headRow.appendChild(document.createElement("th"));
   for (const ts of teamStats) {
@@ -908,7 +926,7 @@ function buildTeamStatsTable(teamStats) {
 }
 
 function buildScoringPlaysList(plays) {
-  const wrapper = el("div", "scoring-plays");
+  const wrapper = el("div", "scoring-plays info-card");
   wrapper.appendChild(el("h2", null, "Scoring Plays"));
 
   const list = document.createElement("ul");
