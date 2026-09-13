@@ -228,17 +228,18 @@ _ORDINALS = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
 
 
 def _parse_situation(competition: dict, sport: str) -> dict | None:
-    """The live "down and distance" (football) or "outs and runners"
-    (baseball) strip. Field names here are a best-effort guess at
-    ESPN's live in-game situation shape, unconfirmed against a real
-    live game the way the stats endpoints eventually were, so this
-    returns None on anything unexpected rather than guessing wrong."""
+    """The live "down and distance" (football, college or NFL alike)
+    or "outs and runners" (baseball) strip. Field names here are a
+    best-effort guess at ESPN's live in-game situation shape,
+    unconfirmed against a real live game the way the stats endpoints
+    eventually were, so this returns None on anything unexpected
+    rather than guessing wrong."""
     situation = competition.get("situation")
     if not situation:
         return None
 
     try:
-        if sport == "football":
+        if sport in ("football", "nfl"):
             text = situation.get("downDistanceText") or situation.get("shortDownDistanceText")
             if not text:
                 down = situation.get("down")
@@ -260,7 +261,9 @@ def _parse_situation(competition: dict, sport: str) -> dict | None:
                 "is_red_zone": situation.get("isRedZone"),
             }
 
-        # Baseball
+        if sport != "baseball":
+            return None
+
         parts = []
         balls, strikes = situation.get("balls"), situation.get("strikes")
         if balls is not None and strikes is not None:
