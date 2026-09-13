@@ -5,7 +5,7 @@
 // is offline. Live score data from /api/ is never cached here; it
 // always goes to the network so scores stay current.
 
-const SHELL_CACHE = "ncaa-scores-shell-v2";
+const SHELL_CACHE = "ncaa-scores-shell-v3";
 const LOGO_CACHE = "ncaa-scores-logos-v1";
 
 const SHELL_ASSETS = [
@@ -89,7 +89,14 @@ async function networkFirst(request, cacheName) {
   const cache = await caches.open(cacheName);
 
   try {
-    const response = await fetch(request);
+    // "no-store" bypasses the browser's own HTTP cache, not just this
+    // Cache API layer, a plain fetch() can still be satisfied out of
+    // the browser's disk cache even when this strategy's whole intent
+    // is "always prefer a genuinely fresh copy", which showed up as a
+    // real bug: new HTML/JS from a deploy loading immediately while
+    // CSS from the previous deploy kept rendering until something else
+    // forced a real refetch.
+    const response = await fetch(request, { cache: "no-store" });
     if (response.ok) {
       cache.put(request, response.clone());
     }

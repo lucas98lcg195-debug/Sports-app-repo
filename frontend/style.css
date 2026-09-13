@@ -252,7 +252,7 @@ main {
 }
 
 .possession-marker {
-  font-size: 0.85rem;
+  font-size: 0.425rem;
   line-height: 1;
 }
 
@@ -385,7 +385,7 @@ body.compact-view .team-rank-badge {
 }
 
 body.compact-view .possession-marker {
-  font-size: 0.7rem;
+  font-size: 0.35rem;
 }
 
 body.compact-view .status-block {

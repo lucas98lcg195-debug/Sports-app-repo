@@ -243,7 +243,13 @@ def _parse_situation(competition: dict, sport: str) -> dict | None:
             if not text:
                 down = situation.get("down")
                 distance = situation.get("distance")
-                if down and distance is not None:
+                # ESPN sends -1 for both fields when there's no actual
+                # down and distance to show (a real value seen in
+                # production, not a hypothetical), which "down and
+                # distance is not None" let straight through as the
+                # literal text "-1th & -1". Both have to be genuine
+                # positive numbers for this to mean anything.
+                if isinstance(down, int) and isinstance(distance, int) and down > 0 and distance > 0:
                     text = f"{_ORDINALS.get(down, f'{down}th')} & {distance}"
             if not text:
                 return None
