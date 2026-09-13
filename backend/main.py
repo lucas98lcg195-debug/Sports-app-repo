@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NCAA Scores API")
 
-SPORTS = ["football", "baseball"]
+SPORTS = ["football", "baseball", "nfl"]
 
 LIVE_POLL_SECONDS = 30
 IDLE_POLL_SECONDS = 300

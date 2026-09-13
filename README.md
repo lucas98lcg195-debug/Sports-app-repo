@@ -54,6 +54,14 @@ ESPN's own pre-formatted status text for a game that hasn't started yet ("Sat 7:
 
 Each sport's conference dropdown on the scoreboard has a "Top 25" option alongside the real conferences. It isn't an ESPN conference id, there's no such filter on their end, so picking it fetches that sport's games unfiltered and keeps only the ones with a team currently in that sport's AP Top 25, using the same `/api/rankings/{sport}` data the Rankings tab already shows. The set of ranked team ids is fetched once per sport and reused for the rest of the session.
 
+## Live situation, possession, and rank badges on the scoreboard
+
+Live games on the scoreboard itself, not just the gamecast page, now show the down-and-distance (football) or count/outs/runners (baseball) line, and a football's possessing team gets a small 🏈 next to its score. This reuses `_parse_situation`, the same function already written for the gamecast page's situation strip, called from `_parse_event` (the scoreboard list's parser) the same way `parse_summary` already calls it, so it rides the existing 30-second scoreboard fetch rather than needing a second ESPN call per game. Whether the plain scoreboard endpoint's payload actually carries the same `situation` shape the summary endpoint does is unconfirmed the same way the rest of that data always has been here, if it turns out not to, the line and marker simply don't appear rather than showing something wrong.
+
+Any team currently in the AP Top 25 also gets a small numbered badge pinned to the corner of its logo, in both the default and compact views, `Team.rank` comes from ESPN's `curatedRank` field (treating their sentinel for "unranked" and anything outside 1-25 as no rank at all), the same normalization the gamecast page's header already used, now shared through one `_parse_rank` helper instead of being duplicated. An unranked team shows no badge at all, there's no placeholder.
+
+The possession marker and the rank badge both live on the team itself (the logo and the score) rather than the shared status strip between the two teams, so both show up in compact view for free without any view-specific logic, they're already part of what compact view keeps visible. The down-and-distance/count line is the one part of this that's regular-view only, hidden in compact by a single CSS rule, the same way compact view already hides team names and favorite stars.
+
 ## Compact view
 
 A button in the scoreboard header, next to search and settings, toggles between the default card-style scoreboard and a compact one, a flat list of rows separated by thin dividers instead of individually bordered cards, each row just the two team logos and the score in between. It's a pure CSS restyle, `frontend/app.js` never builds different markup for the two views, a `compact-view` class toggled on `<body>` is all that changes, so every existing bit of game-row behavior (favorite stars, links through to the game page, live-status coloring) keeps working identically underneath. The choice is remembered per device in `localStorage` under `compactView` and reapplied on load, it's a personal display preference, not something that needs to sync across devices or live on the backend. The toggle only exists on the scores tab, since that's the only page with a game list to restyle.
@@ -84,6 +92,18 @@ One honest limitation from building this: the entire backend, VAPID signing, enc
 ## Deploying
 
 The app is a single Python process with no external database, so it deploys cleanly to Render's free web service tier straight from this GitHub repository. Point Render at the `backend/` directory, set the start command to `uvicorn main:app --host 0.0.0.0 --port $PORT`, and the same process will serve the API and the installable frontend at the resulting public URL. A custom domain from a registrar such as Cloudflare can be pointed at that Render service afterward if wanted, though it is not required to use the app.
+
+## Jumping a week at a time
+
+Alongside the single-day `‹`/`›` buttons, the scoreboard's date nav has `«`/`»` buttons that move a full week at a time. Both call the same `shiftDate` function that already existed for the single-day buttons, just with `±7` instead of `±1`, no new date logic needed.
+
+## NFL, backend only so far
+
+The backend can now talk to ESPN about the NFL, not just college football and college baseball, `"nfl"` is a third registered sport (`SPORT_PATHS` in `espn_client.py`, `SPORTS` in `main.py`), and every route that was already written generically over a sport key, scoreboard, gamecast/box score, team schedule, team list, roster, team stats, and player stats, now serves NFL data as a side effect, without any NFL-specific parsing code. The NFL also gets its own conference table (`NFL_CONFERENCES` in `conferences.py`, AFC and NFC), a separate id namespace from the college conference lists, since the NFL has no NCAA-style conferences at all.
+
+Two things are explicitly not done yet, both called out in the plan this was built from. The NFL has no AP/Coaches poll, so `/api/rankings/nfl` will simply fail against ESPN once actually called (no route exists that calls it yet, since there's no frontend for the NFL at all so far), the plan for that gap is to replace Rankings with a playoff-seeding view for the NFL specifically rather than trying to force a rankings page onto data that doesn't exist. And there is no frontend for any of this: `index.html`, `rankings.html`, `standings.html`, and `news.html` still only know about football and baseball, adding an NFL tab to the UI is a separate, later piece of work.
+
+The NFL conference ids and the assumption that ESPN's `football/nfl` payloads share the same shapes as `football/college-football` are both best-effort guesses verified only against synthetic fixtures in this sandbox, not a real live NFL payload, consistent with how every other piece of ESPN schema in this app has started out.
 
 ## Scope
 

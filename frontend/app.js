@@ -176,8 +176,10 @@ const scoreboardState = {
 };
 
 async function initScoreboardPage() {
+  document.getElementById("prev-week").addEventListener("click", () => shiftDate(-7));
   document.getElementById("prev-day").addEventListener("click", () => shiftDate(-1));
   document.getElementById("next-day").addEventListener("click", () => shiftDate(1));
+  document.getElementById("next-week").addEventListener("click", () => shiftDate(7));
   document.getElementById("today-btn").addEventListener("click", () => setDate(new Date()));
 
   initCompactViewToggle();
@@ -415,14 +417,14 @@ function buildGameRow(game, sport) {
   const away = game.teams.find((t) => t.home_away === "away") || game.teams[0];
   const home = game.teams.find((t) => t.home_away === "home") || game.teams[1];
 
-  row.appendChild(buildTeamBlock(away, sport, `game.html?sport=${sport}&gameId=${game.id}`));
+  row.appendChild(buildTeamBlock(away, sport, `game.html?sport=${sport}&gameId=${game.id}`, game.situation));
   row.appendChild(buildStatusBlock(game));
-  row.appendChild(buildTeamBlock(home, sport, `game.html?sport=${sport}&gameId=${game.id}`));
+  row.appendChild(buildTeamBlock(home, sport, `game.html?sport=${sport}&gameId=${game.id}`, game.situation));
 
   return row;
 }
 
-function buildTeamBlock(team, sport, logoHref) {
+function buildTeamBlock(team, sport, logoHref, situation) {
   const block = el("div", "team-block");
 
   const link = el("a", "team-logo-link");
@@ -433,6 +435,12 @@ function buildTeamBlock(team, sport, logoHref) {
   logo.alt = team ? team.name : "TBD";
   logo.loading = "lazy";
   link.appendChild(logo);
+
+  // AP Top 25 only, nothing shown at all for an unranked team.
+  if (team && team.rank) {
+    link.appendChild(el("span", "team-rank-badge", String(team.rank)));
+  }
+
   block.appendChild(link);
 
   block.appendChild(el("div", "team-name", team ? team.abbreviation || team.name : "TBD"));
@@ -444,6 +452,14 @@ function buildTeamBlock(team, sport, logoHref) {
   const score = team && team.score !== null && team.score !== undefined ? team.score : "";
   block.appendChild(el("div", "team-score", score));
 
+  // Football only in practice, since situation.possession_team_id is
+  // always null for baseball, shown in both the default and compact
+  // views since it lives on the team-block rather than the
+  // regular-view-only status-block.
+  if (team && situation && situation.possession_team_id === team.id) {
+    block.appendChild(el("span", "possession-marker", "🏈"));
+  }
+
   return block;
 }
 
@@ -451,6 +467,11 @@ function buildStatusBlock(game) {
   const block = el("div", "status-block");
   if (game.status_state === "in") block.classList.add("live");
   block.appendChild(el("div", "status-detail", displayGameStatus(game)));
+  // Down-and-distance (football) or count/outs/runners (baseball),
+  // regular view only, hidden in compact view by CSS.
+  if (game.situation && game.situation.text) {
+    block.appendChild(el("div", "situation-text", game.situation.text));
+  }
   if (game.broadcast) {
     block.appendChild(el("div", "broadcast", game.broadcast));
   }
