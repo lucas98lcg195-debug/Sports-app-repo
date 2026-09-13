@@ -1421,25 +1421,30 @@ function renderPlayerKeyStats(container, position, categories) {
 
 // Shared by the team stats sub-tab and the individual player page,
 // since both are just a list of {category, stats: [{label, value}]}.
+// All categories share one card, each its own labeled group inside
+// it, the same visual language the gamecast box score already uses
+// for a team's own Passing/Rushing/Receiving groups.
 function renderStatCategories(content, categories, emptyMessage) {
   content.innerHTML = "";
   if (!categories || categories.length === 0) {
     content.appendChild(el("p", "empty", emptyMessage));
     return;
   }
+  const card = el("div", "info-card");
   for (const category of categories) {
-    const wrapper = el("div", "team-stats");
-    wrapper.appendChild(el("h2", null, category.category));
-    const table = document.createElement("table");
+    const group = el("div", "box-score-group");
+    group.appendChild(el("h4", null, category.category));
+    const table = el("table", "data-table");
     for (const stat of category.stats) {
       const row = document.createElement("tr");
       row.appendChild(el("td", null, stat.label));
       row.appendChild(el("td", null, stat.value ?? ""));
       table.appendChild(row);
     }
-    wrapper.appendChild(table);
-    content.appendChild(wrapper);
+    group.appendChild(table);
+    card.appendChild(group);
   }
+  content.appendChild(card);
 }
 
 function renderRosterSection(content, entry, sport) {
@@ -1794,7 +1799,7 @@ function renderStandings(list, teams) {
     Object.keys(team.stats || {}).forEach((name) => statNames.add(name));
   }
 
-  const table = el("table", "standings-table");
+  const table = el("table", "data-table");
   const headRow = document.createElement("tr");
   headRow.appendChild(document.createElement("th"));
   for (const statName of statNames) {
@@ -1805,7 +1810,7 @@ function renderStandings(list, teams) {
   for (const team of teams) {
     const row = document.createElement("tr");
 
-    const teamCell = el("td", "standings-team-cell");
+    const teamCell = document.createElement("td");
     const link = el("a", "standings-team-link");
     link.href = `team.html?sport=${standingsState.sport}&teamId=${team.team_id}`;
     const logo = el("img", "team-logo small");
@@ -1822,7 +1827,9 @@ function renderStandings(list, teams) {
     table.appendChild(row);
   }
 
-  list.appendChild(table);
+  const card = el("div", "info-card");
+  card.appendChild(table);
+  list.appendChild(card);
 }
 
 // ---------------------------------------------------------------------------
