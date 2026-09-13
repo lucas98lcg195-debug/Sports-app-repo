@@ -486,11 +486,37 @@ body.compact-view .watch-link {
   color: var(--text-dim);
 }
 
+/* Shared card treatment for every section of the gamecast page (and
+   anywhere else that wants one), the same raised-panel-on-dark-page
+   look the scoreboard's own game-row/rank-row/roster-row already use,
+   so a page built entirely out of these reads as one consistent
+   system rather than a new style per section. */
+.info-card {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+
+.info-card h2 {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  margin: 0 0 12px;
+}
+
+.matchup-card {
+  text-align: center;
+}
+
 .game-header {
   display: flex;
   justify-content: space-around;
   gap: 16px;
-  padding: 16px 0;
+  padding: 4px 0 12px;
 }
 
 .team-record {
@@ -515,18 +541,6 @@ body.compact-view .watch-link {
   margin: 4px 0;
 }
 
-.win-prob {
-  margin: 20px 0;
-}
-
-.win-prob h2 {
-  font-size: 0.95rem;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  margin: 0 0 8px;
-}
-
 .win-prob-chart {
   width: 100%;
   height: 70px;
@@ -537,6 +551,12 @@ body.compact-view .watch-link {
   stroke: var(--border);
   stroke-width: 1;
   stroke-dasharray: 4 4;
+}
+
+.win-prob-area {
+  fill: var(--accent);
+  opacity: 0.12;
+  stroke: none;
 }
 
 .win-prob-line {
@@ -550,57 +570,42 @@ body.compact-view .watch-link {
   justify-content: space-between;
   font-size: 0.8rem;
   color: var(--text-dim);
-  margin-top: 4px;
-}
-
-.player-box-scores {
-  margin-top: 20px;
-}
-
-.player-box-scores h2 {
-  font-size: 0.95rem;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  margin-top: 8px;
 }
 
 .box-score-team {
-  margin-bottom: 16px;
+  padding-top: 14px;
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.box-score-team:first-of-type {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: none;
 }
 
 .box-score-team h3 {
   font-size: 1rem;
-  margin: 0 0 6px;
+  margin: 0 0 8px;
 }
 
 .box-score-group {
-  margin-bottom: 12px;
+  margin-bottom: 14px;
   overflow-x: auto;
 }
 
+.box-score-group:last-child {
+  margin-bottom: 0;
+}
+
 .box-score-group h4 {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.03em;
-  margin: 0 0 4px;
-}
-
-.box-score-group table {
-  width: 100%;
-  border-collapse: collapse;
-  white-space: nowrap;
-}
-
-.box-score-group th, .box-score-group td {
-  border: 1px solid var(--border);
-  padding: 6px 8px;
-  font-size: 0.8rem;
-  text-align: center;
-}
-
-.box-score-group td:first-child, .box-score-group th:first-child {
-  text-align: left;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  margin: 0 0 6px;
 }
 
 .box-score-group a {
@@ -609,25 +614,49 @@ body.compact-view .watch-link {
   font-weight: 600;
 }
 
-.line-score, .team-stats table {
+/* One table look shared by the box score, line score, and team stats
+   sections: a plain header row (no vertical grid lines, just a rule
+   under the labels) and a soft zebra stripe on the body rows, instead
+   of the every-cell-boxed grid these used to draw individually. */
+.data-table {
   width: 100%;
   border-collapse: collapse;
-  margin: 12px 0;
-}
-
-.line-score th, .line-score td,
-.team-stats th, .team-stats td {
-  border: 1px solid var(--border);
-  padding: 6px 8px;
-  text-align: center;
   font-size: 0.85rem;
+  white-space: nowrap;
 }
 
-.team-stats h2, .scoring-plays h2 {
-  font-size: 0.95rem;
+.data-table th {
+  padding: 0 8px 8px;
+  font-size: 0.7rem;
   color: var(--text-dim);
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table td {
+  padding: 8px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+.data-table th:first-child, .data-table td:first-child {
+  text-align: left;
+}
+
+.data-table tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.line-score-total {
+  font-weight: 700;
+  color: var(--text);
 }
 
 .scoring-plays ul {
@@ -639,8 +668,12 @@ body.compact-view .watch-link {
   gap: 8px;
 }
 
+/* Each play sits inside the section's own .info-card, so it's given
+   the page's base background rather than another raised one, a
+   recessed row instead of a second, indistinguishable card stacked on
+   the first. */
 .scoring-plays li {
-  background: var(--bg-raised);
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 8px 10px;
