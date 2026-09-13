@@ -427,6 +427,13 @@ function buildGameRow(game, sport) {
 function buildTeamBlock(team, sport, logoHref, situation) {
   const block = el("div", "team-block");
 
+  // The logo and name stay together as one group, closest to the
+  // card's outer edge, with the favorite star and possession marker
+  // in their own narrow stack between that group and the score, using
+  // the horizontal room freed up by no longer centering the whole
+  // team-block within its (much wider) grid column.
+  const iconGroup = el("div", "team-icon-group");
+
   const link = el("a", "team-logo-link");
   link.href = logoHref;
 
@@ -441,24 +448,25 @@ function buildTeamBlock(team, sport, logoHref, situation) {
     link.appendChild(el("span", "team-rank-badge", String(team.rank)));
   }
 
-  block.appendChild(link);
+  iconGroup.appendChild(link);
+  iconGroup.appendChild(el("div", "team-name", team ? team.abbreviation || team.name : "TBD"));
+  block.appendChild(iconGroup);
 
-  block.appendChild(el("div", "team-name", team ? team.abbreviation || team.name : "TBD"));
-
+  const iconsStack = el("div", "team-icons-stack");
   if (team) {
-    block.appendChild(buildFavoriteStar(sport, team, renderMyTeams));
+    iconsStack.appendChild(buildFavoriteStar(sport, team, renderMyTeams));
   }
-
-  const score = team && team.score !== null && team.score !== undefined ? team.score : "";
-  block.appendChild(el("div", "team-score", score));
-
   // Football only in practice, since situation.possession_team_id is
   // always null for baseball, shown in both the default and compact
   // views since it lives on the team-block rather than the
   // regular-view-only status-block.
   if (team && situation && situation.possession_team_id === team.id) {
-    block.appendChild(el("span", "possession-marker", "🏈"));
+    iconsStack.appendChild(el("span", "possession-marker", "🏈"));
   }
+  block.appendChild(iconsStack);
+
+  const score = team && team.score !== null && team.score !== undefined ? team.score : "";
+  block.appendChild(el("div", "team-score", score));
 
   return block;
 }

@@ -126,7 +126,7 @@ body {
 }
 
 main {
-  padding: 12px 16px 32px;
+  padding: 12px 8px 32px;
   max-width: 640px;
   margin: 0 auto;
 }
@@ -174,15 +174,53 @@ main {
   background: var(--bg-raised);
   border: 1px solid var(--border);
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 10px 8px;
 }
 
+/* Also the base layout for the gamecast page's own team headers
+   (buildGameTeamBlock in app.js), a plain vertical stack there. The
+   scoreboard list's game-row overrides this below to a row layout
+   instead, scoped to .game-row specifically so the gamecast header
+   page, which shares this class name but not this structure, is
+   unaffected. */
 .team-block {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
   min-width: 0;
+}
+
+.team-icon-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.team-icons-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Scoreboard rows only: the logo+name group hugs the outer edge of
+   the card instead of centering within its (much wider) grid column,
+   which is what actually frees up the room for the favorite star and
+   possession marker, now their own narrow stack between the team's
+   identity and its score. Both team-blocks read icon-group, then
+   icons-stack, then score, left to right, and the second (home) one
+   is mirrored with row-reverse so its icon-group also ends up hugging
+   its own outer edge rather than sitting toward the card's center. */
+.game-row .team-block {
+  flex-direction: row;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.game-row .team-block:last-of-type {
+  flex-direction: row-reverse;
 }
 
 .team-logo-link {
@@ -348,11 +386,29 @@ body.compact-view .team-block {
   gap: 6px;
 }
 
-/* Both team-blocks share identical markup order (logo, name, star,
-   score), so the second one is flipped to read score-then-logo,
-   producing "Logo Score | Score Logo" symmetric around the divider. */
+/* Both team-blocks share identical markup order (icon-group,
+   icons-stack, score), so the second one is flipped to read
+   score-then-logo, producing "Logo Score | Score Logo" symmetric
+   around the divider. The icons-stack (just the possession marker
+   here, the favorite star stays hidden below) is reordered to sit
+   next to the score rather than next to the logo, its default
+   position now that the two live in the same row-oriented team-block
+   the default view also uses, keeping the marker closest to the
+   center divider the way it always has been in this view. */
 body.compact-view .game-row .team-block:last-of-type {
   flex-direction: row-reverse;
+}
+
+body.compact-view .team-icon-group {
+  order: 1;
+}
+
+body.compact-view .team-score {
+  order: 2;
+}
+
+body.compact-view .team-icons-stack {
+  order: 3;
 }
 
 body.compact-view .team-name,
