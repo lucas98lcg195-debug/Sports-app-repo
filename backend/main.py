@@ -61,8 +61,14 @@ class FavoritePayload(BaseModel):
     logo: Optional[str] = None
 
 
-class RecoverPayload(BaseModel):
+class LinkDevicePayload(BaseModel):
+    device_id: str
     code: str
+
+
+class RenameCodePayload(BaseModel):
+    device_id: str
+    new_code: str
 
 
 class PushSubscribePayload(BaseModel):
@@ -350,34 +356,54 @@ def get_teams(sport: str) -> dict:
 
 @app.get("/api/favorites")
 def get_favorites(device_id: str) -> dict:
-    return {"favorites": favorites.list_favorites(device_id)}
+    code = favorites.code_for_device(device_id)
+    return {"favorites": favorites.list_favorites(code)}
 
 
 @app.post("/api/favorites")
 def add_favorite(payload: FavoritePayload) -> dict:
     if payload.sport not in SPORTS:
         raise HTTPException(status_code=404, detail=f"Unknown sport: {payload.sport}")
-    favorites.add_favorite(payload.device_id, payload.sport, payload.team_id, payload.team_name, payload.logo)
+    code = favorites.code_for_device(payload.device_id)
+    favorites.add_favorite(code, payload.sport, payload.team_id, payload.team_name, payload.logo)
     return {"status": "ok"}
 
 
 @app.delete("/api/favorites/{sport}/{team_id}")
 def remove_favorite(sport: str, team_id: str, device_id: str) -> dict:
-    favorites.remove_favorite(device_id, sport, team_id)
+    code = favorites.code_for_device(device_id)
+    favorites.remove_favorite(code, sport, team_id)
     return {"status": "ok"}
 
 
 @app.get("/api/device/code")
-def get_device_code(device_id: str) -> dict:
-    return {"code": favorites.get_or_create_code(device_id)}
+def get_device_code(device_id: str, code: Optional[str] = None) -> dict:
+    """Called once on every app load. device_id is this browser's own
+    id; code, if given, is whatever this browser has cached locally
+    from before. register_device only actually uses that cached code
+    if device_id isn't already registered under something else, the
+    self-heal path for a browser that lost track of its device id but
+    not the code itself."""
+    return {"code": favorites.register_device(device_id, code)}
 
 
-@app.post("/api/device/recover")
-def recover_device(payload: RecoverPayload) -> dict:
-    device_id = favorites.resolve_code(payload.code)
-    if not device_id:
-        raise HTTPException(status_code=404, detail="Unknown recovery code")
-    return {"device_id": device_id}
+@app.post("/api/device/link")
+def link_device(payload: LinkDevicePayload) -> dict:
+    """"Link a device": attaches this device id to an existing code,
+    typed in from another device or remembered from before. Doesn't
+    touch or delete whatever code this device was previously under."""
+    if not favorites.link_device_to_code(payload.device_id, payload.code):
+        raise HTTPException(status_code=404, detail="Unknown code")
+    return {"code": favorites.resolve_code_for_device(payload.device_id)}
+
+
+@app.post("/api/device/rename")
+def rename_device_code(payload: RenameCodePayload) -> dict:
+    current_code = favorites.code_for_device(payload.device_id)
+    ok, message = favorites.rename_code(current_code, payload.new_code)
+    if not ok:
+        raise HTTPException(status_code=400, detail=message)
+    return {"code": favorites.resolve_code_for_device(payload.device_id)}
 
 
 @app.get("/api/push/vapid-public-key")

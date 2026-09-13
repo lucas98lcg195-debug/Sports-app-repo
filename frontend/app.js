@@ -128,6 +128,50 @@ function setDeviceId(id) {
   }
 }
 
+// The code, not the device id, is what favorites and settings are
+// actually keyed by server-side, this device id is just a pointer to
+// it. Stored the same redundant way (localStorage plus a cookie) so
+// that if one gets cleared, the other still has it.
+function getStoredCode() {
+  try {
+    return localStorage.getItem("device_code") || getCookie("device_code");
+  } catch (err) {
+    return null;
+  }
+}
+
+function setStoredCode(code) {
+  try {
+    localStorage.setItem("device_code", code);
+    setCookie("device_code", code, 365);
+  } catch (err) {
+    console.warn("Could not persist the device code locally", err);
+  }
+}
+
+// Called once per page load, before anything that touches favorites.
+// Sends whatever code this browser has cached, if any, alongside its
+// device id: if the device id already belongs to a code, that's just
+// confirmed and returned. If the device id is unrecognized but the
+// cached code is real, this device silently gets reattached to it,
+// the actual fix for a browser that lost its device id (Safari
+// clearing storage, a fresh install) without losing the code stored
+// alongside it. Only losing both leaves no way to self-heal, same
+// limit "Link a device" already existed to cover by hand.
+async function ensureDeviceRegistered() {
+  try {
+    const cachedCode = getStoredCode();
+    const params = new URLSearchParams({ device_id: DEVICE_ID });
+    if (cachedCode) params.set("code", cachedCode);
+    const res = await fetch(`/api/device/code?${params}`);
+    if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
+    const data = await res.json();
+    if (data.code) setStoredCode(data.code);
+  } catch (err) {
+    console.warn("Could not register this device", err);
+  }
+}
+
 let DEVICE_ID = getOrCreateDeviceId();
 let favoritesSet = new Set();
 
@@ -196,8 +240,9 @@ function buildFavoriteStar(sport, team, onChange) {
   return btn;
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   registerServiceWorker();
+  await ensureDeviceRegistered();
 
   const page = document.body.dataset.page;
   if (page === "scoreboard") initScoreboardPage();
@@ -1790,24 +1835,53 @@ function initSettingsPage() {
     const code = input.value.trim();
     if (!code) return;
 
-    status.textContent = "Checking...";
+    status.textContent = "Linking...";
     try {
-      const res = await fetch("/api/device/recover", {
+      const res = await fetch("/api/device/link", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code }),
+        body: JSON.stringify({ device_id: DEVICE_ID, code }),
       });
       if (!res.ok) {
         status.textContent = "That code wasn't found.";
         return;
       }
       const data = await res.json();
-      setDeviceId(data.device_id);
-      status.textContent = "Linked. Your favorites from that device are now here.";
+      setStoredCode(data.code);
+      status.textContent = "Linked. Your favorites from that code are now here.";
       input.value = "";
       loadDeviceCode();
     } catch (err) {
       status.textContent = "Could not check that code, try again.";
+      console.error(err);
+    }
+  });
+
+  document.getElementById("rename-form").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const input = document.getElementById("rename-input");
+    const status = document.getElementById("rename-status");
+    const newCode = input.value.trim();
+    if (!newCode) return;
+
+    status.textContent = "Renaming...";
+    try {
+      const res = await fetch("/api/device/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ device_id: DEVICE_ID, new_code: newCode }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        status.textContent = data.detail || "Could not rename that code.";
+        return;
+      }
+      setStoredCode(data.code);
+      status.textContent = "Renamed.";
+      input.value = "";
+      loadDeviceCode();
+    } catch (err) {
+      status.textContent = "Could not rename that code, try again.";
       console.error(err);
     }
   });
@@ -1819,10 +1893,14 @@ async function loadDeviceCode() {
   const codeEl = document.getElementById("device-code");
   codeEl.textContent = "Loading...";
   try {
-    const res = await fetch(`/api/device/code?device_id=${encodeURIComponent(DEVICE_ID)}`);
+    const params = new URLSearchParams({ device_id: DEVICE_ID });
+    const cachedCode = getStoredCode();
+    if (cachedCode) params.set("code", cachedCode);
+    const res = await fetch(`/api/device/code?${params}`);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
     codeEl.textContent = data.code;
+    if (data.code) setStoredCode(data.code);
   } catch (err) {
     codeEl.textContent = "Unavailable";
     console.error(err);
