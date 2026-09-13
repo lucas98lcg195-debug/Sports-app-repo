@@ -453,21 +453,37 @@ async function loadScoreboards() {
 // same rankings endpoint the Rankings tab already uses. Not offered
 // for the NFL at all (see index.html, its dropdown has no Top 25
 // option), there's no AP-style poll to filter against there.
+//
+// Keyed by team_id -> rank number rather than a plain Set, so the
+// same cached fetch also backs the gamecast page's rank badge (see
+// buildGameTeamBlock): the scoreboard and game-summary endpoints each
+// try to read a rank straight off ESPN's own payload for that game,
+// but ESPN doesn't reliably include it on every shape, this is the
+// same confirmed-accurate rankings data as the Rankings tab, used as
+// a fallback whenever a game's own data came back unranked.
 const TOP25_FILTER_VALUE = "__top25__";
-const rankedTeamIds = { football: null, nfl: null, baseball: null };
+const rankedTeamsBySport = { football: null, nfl: null, baseball: null };
 
-async function ensureRankedTeamIds(sport) {
-  if (rankedTeamIds[sport]) return rankedTeamIds[sport];
+async function ensureRankedTeams(sport) {
+  if (rankedTeamsBySport[sport]) return rankedTeamsBySport[sport];
   try {
     const res = await fetch(`/api/rankings/${sport}`);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
-    rankedTeamIds[sport] = new Set((data.ranks || []).map((r) => r.team_id));
+    rankedTeamsBySport[sport] = new Map((data.ranks || []).map((r) => [r.team_id, r.rank]));
   } catch (err) {
-    console.warn(`Could not load ${sport} rankings for the Top 25 filter`, err);
-    rankedTeamIds[sport] = new Set();
+    console.warn(`Could not load ${sport} rankings`, err);
+    rankedTeamsBySport[sport] = new Map();
   }
-  return rankedTeamIds[sport];
+  return rankedTeamsBySport[sport];
+}
+
+// Only football and baseball have an AP-style Top 25 to fall back to,
+// same scope as the Top 25 scoreboard filter above; NFL "rank" data
+// is playoff seeding, not a poll rank, and was never shown as this
+// badge on the scoreboard either.
+function rankFallbackSupported(sport) {
+  return sport === "football" || sport === "baseball";
 }
 
 async function loadSportScoreboard(sport) {
@@ -486,7 +502,7 @@ async function loadSportScoreboard(sport) {
     let games = data.games || [];
 
     if (isTop25Filter) {
-      const ranked = await ensureRankedTeamIds(sport);
+      const ranked = await ensureRankedTeams(sport);
       games = games.filter((game) => game.teams.some((t) => ranked.has(t.id)));
     }
 
@@ -652,7 +668,7 @@ async function loadGame(sport, gameId) {
     const res = await fetch(`/api/game/${sport}/${gameId}`);
     if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
     const data = await res.json();
-    renderGame(content, data, sport);
+    await renderGame(content, data, sport);
     return data.status_state !== "post";
   } catch (err) {
     content.innerHTML = "";
@@ -662,12 +678,19 @@ async function loadGame(sport, gameId) {
   }
 }
 
-function renderGame(content, data, sport) {
+async function renderGame(content, data, sport) {
   content.innerHTML = "";
+
+  // ESPN's own game-summary payload doesn't reliably carry a team's
+  // current rank the way its scoreboard payload does, so a team.rank
+  // that came back empty here falls back to the same Top 25 rankings
+  // data the scoreboard's badge and filter already rely on, rather
+  // than the header silently showing no rank at all for a ranked team.
+  const rankedTeams = rankFallbackSupported(sport) ? await ensureRankedTeams(sport) : null;
 
   const header = el("div", "game-header");
   for (const team of data.teams) {
-    header.appendChild(buildGameTeamBlock(team, sport));
+    header.appendChild(buildGameTeamBlock(team, sport, rankedTeams));
   }
   content.appendChild(header);
 
@@ -716,7 +739,7 @@ function formatVenue(venue) {
   return parts.filter(Boolean).join(" · ");
 }
 
-function buildGameTeamBlock(team, sport) {
+function buildGameTeamBlock(team, sport, rankedTeams) {
   const block = el("div", "team-block");
 
   const link = el("a", "team-logo-link");
@@ -725,10 +748,19 @@ function buildGameTeamBlock(team, sport) {
   logo.src = team.logo || "icons/team-placeholder.png";
   logo.alt = team.name;
   link.appendChild(logo);
+
+  // Same badge, overlaid on the logo the same way, as the scoreboard's
+  // team-block (see buildTeamBlock) — this game's own rank if it has
+  // one, else whatever the Top 25 rankings fallback knows, else
+  // nothing at all for an unranked team.
+  const rank = team.rank || (rankedTeams ? rankedTeams.get(team.id) : undefined);
+  if (rank) {
+    link.appendChild(el("span", "team-rank-badge", String(rank)));
+  }
+
   block.appendChild(link);
 
-  const nameText = team.rank ? `#${team.rank} ${team.name}` : team.name;
-  block.appendChild(el("div", "team-name", nameText));
+  block.appendChild(el("div", "team-name", team.name));
   if (team.record) block.appendChild(el("div", "team-record", team.record));
   block.appendChild(buildFavoriteStar(sport, team));
   block.appendChild(el("div", "team-score large", team.score ?? ""));
