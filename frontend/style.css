@@ -499,7 +499,7 @@ body.compact-view .watch-link {
   margin-bottom: 16px;
 }
 
-.info-card h2 {
+.info-card h2, .section-label {
   font-size: 0.75rem;
   color: var(--text-dim);
   text-transform: uppercase;
@@ -573,16 +573,35 @@ body.compact-view .watch-link {
   margin-top: 8px;
 }
 
+/* Each team's own card, tinted with that team's primary color when
+   ESPN supplies one (see --team-color, set inline per card in JS): a
+   colored top edge, plus a soft radial "spotlight" wash that fades
+   out toward the bottom of the card. Both degrade cleanly to the
+   plain card look (var(--border) edge, no wash at all) when a color
+   isn't available. isolation:isolate keeps the wash's stacking
+   contained to this card, so it can sit behind this card's own
+   heading and tables (z-index:1) without touching anything outside
+   it or needing to fight sibling cards for stacking order. */
 .box-score-team {
-  padding-top: 14px;
-  margin-top: 14px;
-  border-top: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  border-top: 3px solid var(--team-color, var(--border));
 }
 
-.box-score-team:first-of-type {
-  padding-top: 0;
-  margin-top: 0;
-  border-top: none;
+.box-score-team::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: radial-gradient(ellipse 140% 55% at 50% 0%, var(--team-color, transparent), transparent 70%);
+  opacity: 0.22;
+  pointer-events: none;
+}
+
+.box-score-team > * {
+  position: relative;
+  z-index: 1;
 }
 
 .box-score-team h3 {
