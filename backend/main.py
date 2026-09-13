@@ -269,9 +269,9 @@ def get_player_stats(sport: str, player_id: str) -> dict:
 def get_team_leaders(sport: str, team_id: str) -> dict:
     if sport not in SPORTS:
         raise HTTPException(status_code=404, detail=f"Unknown sport: {sport}")
-    if sport != "football":
-        # Passing/rushing/receiving leaders are a football-specific
-        # concept, nothing to compute for baseball.
+    if sport not in ("football", "nfl"):
+        # Passing/rushing/receiving leaders are a football concept,
+        # college or pro, nothing to compute for baseball.
         return {"sport": sport, "team_id": team_id, "leaders": {}}
 
     key = f"leaders:{sport}:{team_id}"

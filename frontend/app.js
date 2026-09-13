@@ -19,6 +19,68 @@ function buildEspnGameUrl(sport, gameId) {
 }
 
 // ---------------------------------------------------------------------------
+// League selection
+//
+// The Scores, Rankings, and Standings pages each show one league at a
+// time (College Football, NFL, or College Baseball) rather than every
+// sport at once. The choice is a personal display preference, not
+// favorites or settings, so it's kept in localStorage rather than
+// anything server-side, and it carries across those three pages so
+// picking NFL on one and tapping over to another keeps NFL selected.
+// News isn't part of this: there's no per-league content split for it
+// yet, its feed stays one merged list regardless of league.
+// ---------------------------------------------------------------------------
+
+const LEAGUES = [
+  { key: "football", label: "College Football" },
+  { key: "nfl", label: "NFL" },
+  { key: "baseball", label: "College Baseball" },
+];
+const LEAGUE_KEYS = LEAGUES.map((l) => l.key);
+const LEAGUE_STORAGE_KEY = "selectedLeague";
+
+function getSelectedLeague() {
+  try {
+    const stored = localStorage.getItem(LEAGUE_STORAGE_KEY);
+    if (LEAGUE_KEYS.includes(stored)) return stored;
+  } catch (err) {
+    // Falls through to the default below.
+  }
+  return LEAGUE_KEYS[0];
+}
+
+function setSelectedLeague(key) {
+  try {
+    localStorage.setItem(LEAGUE_STORAGE_KEY, key);
+  } catch (err) {
+    // Not fatal, the choice just won't carry over to the next page load.
+  }
+}
+
+// Builds the League tab strip for the Scores page, which (unlike
+// Rankings and Standings) had no existing single-sport-at-a-time tab
+// control to extend, it used to show both college sports stacked on
+// one page at once. Reuses the .sub-tab styling those other two pages
+// already use for their own sport tabs, for a consistent look.
+function buildLeagueTabs(onSelect) {
+  const container = el("div", "sub-tabs league-tabs");
+  for (const league of LEAGUES) {
+    const btn = el("button", "sub-tab", league.label);
+    btn.type = "button";
+    btn.classList.toggle("active", league.key === getSelectedLeague());
+    btn.addEventListener("click", () => {
+      if (getSelectedLeague() === league.key) return;
+      setSelectedLeague(league.key);
+      for (const child of container.children) child.classList.remove("active");
+      btn.classList.add("active");
+      onSelect(league.key);
+    });
+    container.appendChild(btn);
+  }
+  return container;
+}
+
+// ---------------------------------------------------------------------------
 // Device identity and favorites
 //
 // No accounts here, just an anonymous id this device generates once and
@@ -171,8 +233,8 @@ function el(tag, className, text) {
 
 const scoreboardState = {
   date: new Date(),
-  conference: { football: "", baseball: "" },
-  gamesBySport: { football: [], baseball: [] },
+  conference: { football: "", nfl: "", baseball: "" },
+  gamesBySport: { football: [], nfl: [], baseball: [] },
 };
 
 async function initScoreboardPage() {
@@ -191,7 +253,15 @@ async function initScoreboardPage() {
   // without requiring a special trip back to settings.html.
   getAndResyncPushSubscription();
 
-  for (const sport of SPORTS) {
+  document.getElementById("league-tabs-slot").appendChild(
+    buildLeagueTabs((league) => {
+      applyLeagueVisibility(league);
+      renderMyTeams();
+    })
+  );
+  applyLeagueVisibility(getSelectedLeague());
+
+  for (const sport of LEAGUE_KEYS) {
     const select = document.getElementById(`${sport}-conference`);
     select.addEventListener("change", () => {
       scoreboardState.conference[sport] = select.value;
@@ -203,6 +273,15 @@ async function initScoreboardPage() {
   await loadFavorites();
   loadScoreboards();
   setInterval(loadScoreboards, SCOREBOARD_POLL_MS);
+}
+
+// Only one league's section is shown at a time, the game data for all
+// three is still fetched together in the background (see
+// loadScoreboards), so switching leagues is instant, no new fetch.
+function applyLeagueVisibility(selectedLeague) {
+  for (const key of LEAGUE_KEYS) {
+    document.getElementById(`${key}-section`).hidden = key !== selectedLeague;
+  }
 }
 
 // The compact view is a pure CSS restyle driven by a class on <body>,
@@ -242,7 +321,7 @@ function applyCompactView(isCompact, btn) {
 }
 
 async function loadConferenceOptions() {
-  for (const sport of SPORTS) {
+  for (const sport of LEAGUE_KEYS) {
     const select = document.getElementById(`${sport}-conference`);
     try {
       const res = await fetch(`/api/conferences/${sport}`);
@@ -320,15 +399,17 @@ function displayGameStatus(game) {
 
 async function loadScoreboards() {
   document.getElementById("date-label").textContent = formatDateLabel(scoreboardState.date);
-  await Promise.all(SPORTS.map((sport) => loadSportScoreboard(sport)));
+  await Promise.all(LEAGUE_KEYS.map((sport) => loadSportScoreboard(sport)));
 }
 
 // "Top 25" isn't a real ESPN conference id, it's a stand-in we filter
 // for ourselves: fetch the day's games unfiltered, then keep only
 // games with a team currently in that sport's AP Top 25, using the
-// same rankings endpoint the Rankings tab already uses.
+// same rankings endpoint the Rankings tab already uses. Not offered
+// for the NFL at all (see index.html, its dropdown has no Top 25
+// option), there's no AP-style poll to filter against there.
 const TOP25_FILTER_VALUE = "__top25__";
-const rankedTeamIds = { football: null, baseball: null };
+const rankedTeamIds = { football: null, nfl: null, baseball: null };
 
 async function ensureRankedTeamIds(sport) {
   if (rankedTeamIds[sport]) return rankedTeamIds[sport];
@@ -386,19 +467,18 @@ function renderGames(container, games, sport, emptyMessage) {
   }
 }
 
+// Scoped to whichever league is currently selected, not every
+// favorited team across all three at once, matching the rest of this
+// page now showing one league at a time.
 function renderMyTeams() {
   const section = document.getElementById("my-teams-section");
   const container = document.getElementById("my-teams-games");
   if (!section || !container) return;
 
-  const matches = [];
-  for (const sport of SPORTS) {
-    for (const game of scoreboardState.gamesBySport[sport] || []) {
-      if (game.teams.some((t) => isFavorite(sport, t.id))) {
-        matches.push({ game, sport });
-      }
-    }
-  }
+  const sport = getSelectedLeague();
+  const matches = (scoreboardState.gamesBySport[sport] || []).filter((game) =>
+    game.teams.some((t) => isFavorite(sport, t.id))
+  );
 
   if (matches.length === 0) {
     section.hidden = true;
@@ -407,7 +487,7 @@ function renderMyTeams() {
 
   section.hidden = false;
   container.innerHTML = "";
-  for (const { game, sport } of matches) {
+  for (const game of matches) {
     container.appendChild(buildGameRow(game, sport));
   }
 }
@@ -782,6 +862,12 @@ const teamPageState = {
   bySport: {
     football: { teamId: null, resolved: false, name: null, schedule: null, stats: null, roster: null, leaders: null },
     baseball: { teamId: null, resolved: false, name: null, schedule: null, stats: null, roster: null, leaders: null },
+    // An NFL franchise has no college sibling to resolve, so it never
+    // shows the sport-toggle at all (see initTeamPage), but it still
+    // needs an entry here or a direct link straight to an NFL team
+    // (from Search, Rankings, or Standings) would be rejected as an
+    // unrecognized sport before ever reaching that check.
+    nfl: { teamId: null, resolved: false, name: null, schedule: null, stats: null, roster: null, leaders: null },
   },
 };
 
@@ -802,6 +888,12 @@ async function initTeamPage() {
   teamPageState.sport = sport;
   teamPageState.bySport[sport].teamId = teamId;
   teamPageState.bySport[sport].resolved = true;
+
+  // The sport-toggle only ever offers switching between a school's
+  // college football and college baseball programs, an NFL franchise
+  // has no sibling to resolve at all, so the toggle just doesn't
+  // render there rather than offering a switch that can't work.
+  document.getElementById("team-sport-toggle").hidden = sport === "nfl";
 
   for (const s of SPORTS) {
     document.getElementById(`team-sport-${s}`).addEventListener("click", () => switchTeamSport(s));
@@ -1027,9 +1119,9 @@ function buildTeamHighlights(entry, sport) {
     tiles.appendChild(buildHighlightTile("Win %", `${Math.round(record.pct * 100)}%`, `${record.wins}-${record.losses}`));
   }
 
-  // Passing/rushing/receiving leaders are a football-specific concept,
-  // the backend only computes them for that sport.
-  if (sport === "football" && entry.leaders) {
+  // Passing/rushing/receiving leaders are a football concept, college
+  // or pro, the backend only computes them for those two sports.
+  if ((sport === "football" || sport === "nfl") && entry.leaders) {
     const leaderSpecs = [
       { key: "passing", label: "Passing Leader" },
       { key: "rushing", label: "Rushing Leader" },
@@ -1396,12 +1488,13 @@ function buildNewsCard(article) {
 // Rankings page
 // ---------------------------------------------------------------------------
 
-const rankingsState = { sport: "football" };
+const rankingsState = { sport: getSelectedLeague() };
 
 function initRankingsPage() {
-  for (const sport of SPORTS) {
+  for (const sport of LEAGUE_KEYS) {
     document.getElementById(`rankings-${sport}-tab`).addEventListener("click", () => {
       rankingsState.sport = sport;
+      setSelectedLeague(sport);
       updateRankingsSportTabs();
       loadRankings();
     });
@@ -1411,7 +1504,7 @@ function initRankingsPage() {
 }
 
 function updateRankingsSportTabs() {
-  for (const sport of SPORTS) {
+  for (const sport of LEAGUE_KEYS) {
     document.getElementById(`rankings-${sport}-tab`).classList.toggle("active", rankingsState.sport === sport);
   }
 }
@@ -1419,6 +1512,19 @@ function updateRankingsSportTabs() {
 async function loadRankings() {
   const list = document.getElementById("rankings-list");
   list.innerHTML = "";
+
+  const heading = document.getElementById("rankings-heading");
+  heading.textContent = rankingsState.sport === "nfl" ? "Playoff Seeding" : "AP Top 25";
+
+  // There's no AP/Coaches poll for the NFL, ESPN has nothing to serve
+  // here for it. A playoff-seeding view is the planned replacement for
+  // this tab specifically, not built yet, so this says so plainly
+  // instead of firing a request guaranteed to fail.
+  if (rankingsState.sport === "nfl") {
+    list.appendChild(el("p", "empty", "NFL playoff seeding is coming in a future update."));
+    return;
+  }
+
   list.appendChild(el("p", "loading", "Loading..."));
 
   try {
@@ -1477,12 +1583,13 @@ function buildTrendText(rank) {
 // Standings page
 // ---------------------------------------------------------------------------
 
-const standingsState = { sport: "football", conference: "" };
+const standingsState = { sport: getSelectedLeague(), conference: "" };
 
 function initStandingsPage() {
-  for (const sport of SPORTS) {
+  for (const sport of LEAGUE_KEYS) {
     document.getElementById(`standings-${sport}-tab`).addEventListener("click", () => {
       standingsState.sport = sport;
+      setSelectedLeague(sport);
       updateStandingsSportTabs();
       loadStandingsConferenceOptions();
     });
@@ -1497,7 +1604,7 @@ function initStandingsPage() {
 }
 
 function updateStandingsSportTabs() {
-  for (const sport of SPORTS) {
+  for (const sport of LEAGUE_KEYS) {
     document.getElementById(`standings-${sport}-tab`).classList.toggle("active", standingsState.sport === sport);
   }
 }
@@ -1612,21 +1719,24 @@ async function loadSearchTeams() {
   const status = document.getElementById("search-status");
   status.textContent = "Loading teams...";
 
-  try {
-    const bySport = await Promise.all(
-      SPORTS.map(async (sport) => {
+  // Each league is fetched independently, one failing (NFL's data is
+  // newer and less exercised than the two college feeds) shouldn't
+  // take down search for the other two.
+  const bySport = await Promise.all(
+    LEAGUE_KEYS.map(async (sport) => {
+      try {
         const res = await fetch(`/api/teams/${sport}`);
         if (!res.ok) throw new Error(`Request failed with status ${res.status}`);
         const data = await res.json();
         return (data.teams || []).map((t) => ({ ...t, sport }));
-      })
-    );
-    searchTeams = bySport.flat();
-    status.textContent = searchTeams.length > 0 ? "Start typing to search." : "No teams available right now.";
-  } catch (err) {
-    status.textContent = "Could not load the team list.";
-    console.error(err);
-  }
+      } catch (err) {
+        console.warn(`Could not load ${sport} teams for search`, err);
+        return [];
+      }
+    })
+  );
+  searchTeams = bySport.flat();
+  status.textContent = searchTeams.length > 0 ? "Start typing to search." : "No teams available right now.";
 }
 
 function renderSearchResults(query) {
